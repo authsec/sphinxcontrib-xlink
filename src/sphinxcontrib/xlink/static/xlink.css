@@ -1,0 +1,44 @@
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
+
+.xlink-icon {
+    margin-right: 0.3em;
+    font-size: 0.9em;
+    color: #666;
+    display: inline-block;
+}
+
+.xlink-link {
+    text-decoration: underline;
+    color: #2980b9;
+}
+
+.xlink-tag-description {
+    color: #555;
+    font-style: italic;
+    margin-bottom: 0.8em;
+}
+
+a.xlink-bookmark-button.reference.download {
+    display: inline-block !important;
+    background-color: #2980b9 !important;
+    color: white !important;
+    padding: 0.6em 1.4em !important;
+    border-radius: 25px !important;
+    text-decoration: none !important;
+    font-size: 0.85em !important;
+    margin: 0.5em 0 !important;
+    transition: all 0.2s ease;
+    border: none !important;
+}
+
+/* Ensure Sphinx download icon is white */
+a.xlink-bookmark-button.reference.download::before,
+a.xlink-bookmark-button.reference.download span,
+a.xlink-bookmark-button.reference.download code {
+    color: white !important;
+}
+
+a.xlink-bookmark-button.reference.download:hover {
+    background-color: #1a5276 !important;
+    transform: translateY(-1px);
+}

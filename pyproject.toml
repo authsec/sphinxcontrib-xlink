@@ -1,0 +1,29 @@
+[project]
+name = "sphinxcontrib-xlink"
+version = "1.0.0"
+description = "A Sphinx extension for external link management via .xlink files."
+readme = "README.md"
+authors = [{name = "Jens Frey", email = "jens.frey@coffeecrew.org"}]
+license = {file = "LICENSE"}
+dependencies = ["sphinx>=5.0"]
+classifiers = [
+    "Framework :: Sphinx :: Extension",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "beautifulsoup4",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["sphinxcontrib*"]
+
+[tool.setuptools.package-data]
+"sphinxcontrib.xlink" = ["static/*.css"]
