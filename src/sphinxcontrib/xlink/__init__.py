@@ -40,115 +40,65 @@ def downgrade_xlink_nodes(app, doctree, fromdocname):
         new_node.extend(node.children)
         node.replace_self(new_node)
 
-
 # --- Custom Transform Engine for Terms & Refs ---
 
 class XLinkSubstitutionTransform(Transform):
-    """
-    Intercepts |xlink-term-xxx| and |xlink-ref-xxx| before Docutils triggers a 
-    missing substitution warning, and converts them into pending cross-references.
-    """
     default_priority = 210
 
     def apply(self):
         for node in list(self.document.findall(nodes.substitution_reference)):
             refname = node['refname']
             
-            # 1. Handle Glossary Terms
             if refname.startswith('xlink-term-'):
                 slug = refname[11:] 
-                
                 is_full = False
                 if slug.endswith('-full'):
                     slug = slug[:-5]
                     is_full = True
 
                 xref = pending_xref(
-                    '',
-                    refdomain='std',
-                    reftype='term',
-                    reftarget=slug,
-                    refexplicit=False, 
-                    refwarn=True,
-                    modname=None,
-                    classname=None,
+                    '', refdomain='std', reftype='term', reftarget=slug,
+                    refexplicit=False, refwarn=True, modname=None, classname=None,
                     xlink_is_full=is_full
                 )
                 xref['refdoc'] = self.document.settings.env.docname
                 xref += nodes.inline('', f'|{refname}|', classes=['xlink-term-placeholder'])
                 node.replace_self(xref)
 
-            # 2. Handle Document Section References
             elif refname.startswith('xlink-ref-'):
                 slug = refname[10:]
-                
                 xref = pending_xref(
-                    '',
-                    refdomain='std',
-                    reftype='ref',
-                    reftarget=slug,
-                    refexplicit=False,
-                    refwarn=True,
-                    modname=None,
-                    classname=None
+                    '', refdomain='std', reftype='ref', reftarget=slug,
+                    refexplicit=False, refwarn=True, modname=None, classname=None
                 )
                 xref['refdoc'] = self.document.settings.env.docname
                 xref += nodes.inline('', f'|{refname}|', classes=['xlink-ref-placeholder'])
                 node.replace_self(xref)
 
-
 def resolve_xlink_term(app, env, node, contnode):
-    """
-    Catches the pending cross-reference created by the Transform and 
-    maps it perfectly to the correct Glossary term, preserving exact casing.
-    """
     if node.get('reftype') == 'term' and node.get('xlink_is_full') is not None:
         slug = node['reftarget']
         is_full = node['xlink_is_full']
-        
         std_domain = env.domains.get('std')
-        if not std_domain: 
-            return None
+        if not std_domain: return None
         
         for obj in std_domain.get_objects():
             if obj[2] == 'term':
                 term = obj[1]
-                
                 match = re.search(r'^(.*?)\s*\((.*?)\)$', term)
-                if match:
-                    short_text = match.group(2).strip()
-                    normalized = unicodedata.normalize('NFD', short_text).encode('ascii', 'ignore').decode('utf-8')
-                    term_slug = re.sub(r'[^a-z0-9]+', '-', normalized.lower()).strip('-')
-                    display_text = term if is_full else short_text
-                else:
-                    normalized = unicodedata.normalize('NFD', term).encode('ascii', 'ignore').decode('utf-8')
-                    term_slug = re.sub(r'[^a-z0-9]+', '-', normalized.lower()).strip('-')
-                    display_text = term
+                short_text = match.group(2).strip() if match else term.strip()
+                normalized = unicodedata.normalize('NFD', short_text).encode('ascii', 'ignore').decode('utf-8')
+                term_slug = re.sub(r'[^a-z0-9]+', '-', normalized.lower()).strip('-')
                     
                 if term_slug == slug:
-                    docname = obj[3]
-                    anchor = obj[4]
-                    
-                    refnode = make_refnode(
-                        app.builder, 
-                        node['refdoc'], 
-                        docname, 
-                        anchor,
-                        nodes.inline('', display_text, classes=['xref', 'std', 'std-term']),
-                        term
+                    display_text = term if is_full else short_text
+                    return make_refnode(
+                        app.builder, node['refdoc'], obj[3], obj[4],
+                        nodes.inline('', display_text, classes=['xref', 'std', 'std-term']), term
                     )
-                    return refnode
-                    
-        return None
-
-
-# --- Automated Header Labeling ---
+    return None
 
 def auto_label_sections(app, doctree):
-    """
-    Automatically creates a clean, normalized standard label for every heading 
-    in the project so it can be referenced instantly via :ref:.
-    """
     env = app.env
     std = env.domains.get('std')
     if not std: return
@@ -159,71 +109,53 @@ def auto_label_sections(app, doctree):
             title_text = title_node.astext()
             normalized = unicodedata.normalize('NFD', title_text).encode('ascii', 'ignore').decode('utf-8')
             slug = re.sub(r'[^a-z0-9]+', '-', normalized.lower()).strip('-')
-            
             if not slug: continue
             
             node_id = node['ids'][0] if node['ids'] else slug
-            
             if slug not in std.labels:
                 std.labels[slug] = (env.docname, node_id, title_text)
                 std.anonlabels[slug] = (env.docname, node_id)
 
-
 # --- Sphinx-Needs Integration ---
 
 def _get_xlink_data(app, link_id):
-    """Internal helper to find link data for dynamic functions."""
     env = app.env
     config = env.config
     source_dir = os.path.normpath(os.path.join(env.srcdir, config.xlink_directory))
-    
-    if not os.path.isdir(source_dir):
-        return None, None
+    if not os.path.isdir(source_dir): return None, None
 
-    for filename in os.listdir(source_dir):
-        if filename.endswith('.xlink'):
-            path = os.path.join(source_dir, filename)
-            with open(path, "r", encoding="utf-8-sig") as f:
-                for line in f:
-                    clean = line.strip()
-                    if not clean or clean.startswith('#'): continue
-                    if " :: " in clean:
-                        parts = [p.strip() for p in clean.split(" :: ", 3)]
-                        if len(parts) >= 3 and parts[0] == link_id:
-                            return parts[1], parts[2]
+    for root, dirs, files in os.walk(source_dir):
+        if '.xlink' in dirs: dirs.remove('.xlink')
+        for filename in files:
+            if filename.endswith('.xlink'):
+                with open(os.path.join(root, filename), "r", encoding="utf-8-sig") as f:
+                    for line in f:
+                        clean = line.strip()
+                        if not clean or clean.startswith('#'): continue
+                        if " :: " in clean:
+                            parts = [p.strip() for p in clean.split(" :: ", 3)]
+                            if len(parts) >= 3 and parts[0] == link_id:
+                                return parts[1], parts[2]
     return None, None
 
 def xlink_func(app, need, needs, link_ids):
-    """Returns 'Title <URL>; ' for one or more link IDs in sphinx-needs."""
-    if isinstance(link_ids, str):
-        link_ids = [i.strip() for i in link_ids.split(',')]
-    
+    if isinstance(link_ids, str): link_ids = [i.strip() for i in link_ids.split(',')]
     results = []
     for lid in link_ids:
         title, url = _get_xlink_data(app, lid)
-        if title and url:
-            results.append(f"{title} <{url}>")
-        else:
-            logger.warning(f"xlink: ID '{lid}' not found in needs function.")
-            
+        if title and url: results.append(f"{title} <{url}>")
     return "; ".join(results) if results else ""
 
-def xlink_url(app, need, needs, link_ids):
-    """Returns semicolon-separated raw URLs for sphinx-needs."""
-    if isinstance(link_ids, str):
-        link_ids = [i.strip() for i in link_ids.split(',')]
-    
+def xlink_url_func(app, need, needs, link_ids):
+    if isinstance(link_ids, str): link_ids = [i.strip() for i in link_ids.split(',')]
     results = []
     for lid in link_ids:
         _, url = _get_xlink_data(app, lid)
         if url: results.append(url)
     return "; ".join(results)
 
-def xlink_title(app, need, needs, link_ids):
-    """Returns semicolon-separated titles for sphinx-needs."""
-    if isinstance(link_ids, str):
-        link_ids = [i.strip() for i in link_ids.split(',')]
-    
+def xlink_title_func(app, need, needs, link_ids):
+    if isinstance(link_ids, str): link_ids = [i.strip() for i in link_ids.split(',')]
     results = []
     for lid in link_ids:
         title, _ = _get_xlink_data(app, lid)
@@ -231,52 +163,24 @@ def xlink_title(app, need, needs, link_ids):
     return "; ".join(results)
 
 def register_needs_integration(app, config):
-    """Registers functions and default string_links if sphinx-needs is present."""
     if 'sphinx_needs' not in config.extensions and 'sphinxcontrib.needs' not in config.extensions:
         return
-
-    # To avoid the 'unpickleable configuration value' warning, we ensure 
-    # needs_functions is managed carefully.
-    if not hasattr(config, 'needs_functions'):
-        config.needs_functions = []
+    if not hasattr(config, 'needs_functions'): config.needs_functions = []
     
-    # We use a list of tuples (function, name)
-    funcs_to_add = [
-        (xlink_func, 'xlink'), 
-        (xlink_url, 'xlink_url'), 
-        (xlink_title, 'xlink_title')
-    ]
+    mapping = [(xlink_func, 'xlink'), (xlink_url_func, 'xlink_url'), (xlink_title_func, 'xlink_title')]
+    existing = [getattr(f, '__name__', str(f)) for f in config.needs_functions]
     
-    # Get currently registered function names to avoid duplicates
-    existing_names = []
-    for f in config.needs_functions:
-        if callable(f):
-            existing_names.append(getattr(f, '__name__', ''))
-        elif isinstance(f, (list, tuple)) and len(f) > 1:
-            existing_names.append(f[1])
-
-    for func, name in funcs_to_add:
-        if name not in existing_names:
-            # Setting the name on the function object helps sphinx-needs resolution
+    for func, name in mapping:
+        if name not in existing:
             func.__name__ = name
             config.needs_functions.append(func)
 
-    # Register Default String Link Mapping
     target_options = getattr(config, 'xlink_needs_string_link_options', ['xlink'])
-    
-    xlink_mapping = {
-        'regex': r'^(?P<name>.*?) <(?P<url>.*?)>$',
-        'link_url': '{{url}}',
-        'link_name': '{{name}}',
-        'options': target_options 
-    }
+    xlink_mapping = {'regex': r'^(?P<name>.*?) <(?P<url>.*?)>$', 'link_url': '{{url}}', 
+                     'link_name': '{{name}}', 'options': target_options}
 
-    if not hasattr(config, 'needs_string_links'):
-        config.needs_string_links = {}
-    
-    if 'xlink' not in config.needs_string_links:
-        config.needs_string_links['xlink'] = xlink_mapping
-
+    if not hasattr(config, 'needs_string_links'): config.needs_string_links = {}
+    if 'xlink' not in config.needs_string_links: config.needs_string_links['xlink'] = xlink_mapping
 
 # --- VSCode Snippet Generators ---
 
@@ -294,28 +198,34 @@ def generate_vscode_snippets(app):
     id_list = []
     file_list = []
     
-    for filename in os.listdir(xlink_dir):
-        if filename.endswith('.xlink'):
-            file_list.append(filename[:-6])
-            with open(os.path.join(xlink_dir, filename), "r", encoding="utf-8-sig") as f:
-                for line in f:
-                    clean_line = line.strip()
-                    if not clean_line or clean_line.startswith('#'): continue
-                    if " :: " in clean_line:
-                        parts = [p.strip() for p in clean_line.split(" :: ", 3)]
-                        if len(parts) in (3, 4):
-                            lid, title, _ = parts[:3]
-                            tags = parts[3].strip() if len(parts) == 4 else ""
-                            id_list.append((lid, title))
-                            
-                            description = f"Title:\n{title}\n\nID: {lid}"
-                            if tags: description += f"\nTags: {tags}"
-                            
-                            snippets[f"xlink-{lid}"] = {
-                                "prefix": [f"ddxl-{title}", f"ddxl-{lid}"],
-                                "body": [f":xlink:`{lid}`$0"],
-                                "description": description
-                            }
+    for root, dirs, files in os.walk(xlink_dir):
+        if '.xlink' in dirs: dirs.remove('.xlink')
+        for filename in files:
+            if filename.endswith('.xlink'):
+                filepath = os.path.join(root, filename)
+                rel_path = os.path.relpath(filepath, xlink_dir)
+                rel_file_base = os.path.splitext(rel_path)[0].replace(os.sep, '/')
+                file_list.append(rel_file_base)
+                
+                with open(filepath, "r", encoding="utf-8-sig") as f:
+                    for line in f:
+                        clean_line = line.strip()
+                        if not clean_line or clean_line.startswith('#'): continue
+                        if " :: " in clean_line:
+                            parts = [p.strip() for p in clean_line.split(" :: ", 3)]
+                            if len(parts) in (3, 4):
+                                lid, title, _ = parts[:3]
+                                tags = parts[3].strip() if len(parts) == 4 else ""
+                                id_list.append((lid, title))
+                                
+                                description = f"Title:\n{title}\n\nID: {lid}"
+                                if tags: description += f"\nTags: {tags}"
+                                
+                                snippets[f"xlink-{lid}"] = {
+                                    "prefix": [f"ddxl-{title}", f"ddxl-{lid}"],
+                                    "body": [f":xlink:`{lid}`$0"],
+                                    "description": description
+                                }
 
     if not id_list: return
     id_list.sort()
@@ -425,7 +335,6 @@ def generate_vscode_ref_snippets(app, env):
     except Exception: pass
 
 def generate_vscode_needs_snippets(app, env):
-    """Generates ddxn- snippets for sphinx-needs usage."""
     if not app.config.xlink_generate_vscode_snippets: return
     
     vscode_dir = os.path.join(os.path.dirname(app.srcdir), '.vscode')
@@ -434,13 +343,15 @@ def generate_vscode_needs_snippets(app, env):
     id_list = []
     source_dir = os.path.normpath(os.path.join(app.srcdir, app.config.xlink_directory))
     if os.path.isdir(source_dir):
-        for filename in os.listdir(source_dir):
-            if filename.endswith('.xlink'):
-                with open(os.path.join(source_dir, filename), "r", encoding="utf-8-sig") as f:
-                    for line in f:
-                        if " :: " in line and not line.strip().startswith('#'):
-                            parts = line.split(" :: ")
-                            id_list.append((parts[0].strip(), parts[1].strip()))
+        for root, dirs, files in os.walk(source_dir):
+            if '.xlink' in dirs: dirs.remove('.xlink')
+            for filename in files:
+                if filename.endswith('.xlink'):
+                    with open(os.path.join(root, filename), "r", encoding="utf-8-sig") as f:
+                        for line in f:
+                            if " :: " in line and not line.strip().startswith('#'):
+                                parts = line.split(" :: ")
+                                id_list.append((parts[0].strip(), parts[1].strip()))
 
     snippets = {}
     for lid, title in id_list:
@@ -456,6 +367,84 @@ def generate_vscode_needs_snippets(app, env):
             json.dump(snippets, f, indent=2)
     except Exception: pass
 
+def generate_vscode_tag_snippets(app, env):
+    config = app.config
+    if not config.xlink_generate_vscode_snippets: return
+    
+    vscode_dir = os.path.join(os.path.dirname(app.srcdir), '.vscode')
+    snippet_file = os.path.join(vscode_dir, 'xlink-tags.json.code-snippets')
+    
+    snippets = {}
+    for tag_slug, tag_data in config.xlink_allowed_tags.items():
+        title = tag_slug
+        desc = ""
+        if isinstance(tag_data, (list, tuple)):
+            title = str(tag_data[0])
+            desc = str(tag_data[1]) if len(tag_data) > 1 else ""
+        else:
+            title = str(tag_data)
+            
+        display_desc = f"{title}\n\n{desc}" if desc else title
+        
+        snippets[f"xlink-tag-{tag_slug}"] = {
+            "prefix": [f"ddxtag-{title}", f"ddxtag-{tag_slug}"],
+            "body": [tag_slug],
+            "description": f"Tag: {display_desc}"
+        }
+
+    try:
+        os.makedirs(vscode_dir, exist_ok=True)
+        with open(snippet_file, 'w', encoding='utf-8') as f:
+            json.dump(snippets, f, indent=2)
+    except Exception: pass
+
+def generate_vscode_file_snippets(app, env):
+    config = app.config
+    if not config.xlink_generate_vscode_snippets: return
+    
+    source_dir = os.path.normpath(os.path.join(app.srcdir, config.xlink_directory))
+    if not os.path.isdir(source_dir): return
+    
+    vscode_dir = os.path.join(os.path.dirname(app.srcdir), '.vscode')
+    snippet_file = os.path.join(vscode_dir, 'xlink-files.json.code-snippets')
+    
+    snippets = {}
+    for root, dirs, files in os.walk(source_dir):
+        if '.xlink' in dirs: dirs.remove('.xlink')
+        for filename in files:
+            if filename.endswith('.xlink'):
+                filepath = os.path.join(root, filename)
+                rel_path = os.path.relpath(filepath, source_dir)
+                rel_file_base = os.path.splitext(rel_path)[0].replace(os.sep, '/')
+                
+                section_name = filename[:-6]
+                section_desc = ""
+                
+                with open(filepath, "r", encoding="utf-8-sig") as f:
+                    for _ in range(10):
+                        line = f.readline().strip()
+                        if line.startswith("# xlink-section-name:"):
+                            section_name = line.replace("# xlink-section-name:", "").strip()
+                        elif line.startswith("# xlink-section-description:"):
+                            section_desc += line.replace("# xlink-section-description:", "").strip() + " "
+                
+                display_desc = f"File: {rel_file_base}.xlink\nName: {section_name}"
+                if section_desc: display_desc += f"\n\n{section_desc}"
+                
+                # Create a safe JSON key by replacing forward slashes with hyphens
+                safe_key = rel_file_base.replace('/', '-')
+                
+                snippets[f"xlink-file-{safe_key}"] = {
+                    "prefix": [f"ddxfile-{section_name}", f"ddxfile-{rel_file_base}"],
+                    "body": [rel_file_base],
+                    "description": display_desc
+                }
+
+    try:
+        os.makedirs(vscode_dir, exist_ok=True)
+        with open(snippet_file, 'w', encoding='utf-8') as f:
+            json.dump(snippets, f, indent=2)
+    except Exception: pass
 
 def cleanup_temp_files(app, exception):
     pattern = os.path.join(app.srcdir, "bookmarks_*.html")
@@ -477,9 +466,9 @@ def setup(app):
     app.add_config_value('xlink_latex_show_urls', 'no', 'env')
     app.add_config_value('xlink_allowed_tags', {}, 'env')
     app.add_config_value('xlink_default_untagged_name', 'Untagged', 'env')
-    
-    # NEW configuration option for sphinx-needs integration
     app.add_config_value('xlink_needs_string_link_options', ['xlink'], 'env')
+    
+    app.add_config_value('xlink_add_to_toctree_builders', ['html', 'dirhtml', 'singlehtml', 'readthedocs'], 'env')
     
     app.add_node(xlink_reference, latex=(visit_xlink_reference_latex, depart_xlink_reference_latex))
     
@@ -495,6 +484,9 @@ def setup(app):
     app.connect('env-updated', generate_vscode_term_snippets)
     app.connect('env-updated', generate_vscode_ref_snippets)
     app.connect('env-updated', generate_vscode_needs_snippets)
+    app.connect('env-updated', generate_vscode_tag_snippets)
+    app.connect('env-updated', generate_vscode_file_snippets)
+    
     app.connect('build-finished', cleanup_temp_files)
     app.connect('doctree-resolved', downgrade_xlink_nodes)
 
@@ -503,4 +495,4 @@ def setup(app):
     app.connect('builder-inited', lambda app: app.config.html_static_path.append(static_dir))
     app.add_css_file('xlink.css')
 
-    return {'version': '1.0.0', 'parallel_read_safe': True, 'parallel_write_safe': True}
+    return {'version': '1.1.0', 'parallel_read_safe': True, 'parallel_write_safe': True}

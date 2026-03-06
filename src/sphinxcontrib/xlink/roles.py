@@ -31,29 +31,32 @@ def xlink_role(name, rawtext, text, lineno, inliner, options=None, content=None)
         return [], []
 
     key_value_pairs = {}
-    for filename in os.listdir(source_directory):
-        if filename.endswith('.xlink'):
-            with open(os.path.join(source_directory, filename), "r", encoding="utf-8-sig") as file:
-                for line_num, line in enumerate(file, 1):
-                    clean_line = line.strip()
-                    if not clean_line or clean_line.startswith('#'):
-                        continue
+    
+    # FIXED: Re-applied os.walk for recursive folder support
+    for root, dirs, files in os.walk(source_directory):
+        if '.xlink' in dirs: dirs.remove('.xlink')
+        for filename in files:
+            if filename.endswith('.xlink'):
+                with open(os.path.join(root, filename), "r", encoding="utf-8-sig") as file:
+                    for line_num, line in enumerate(file, 1):
+                        clean_line = line.strip()
+                        if not clean_line or clean_line.startswith('#'):
+                            continue
 
-                    if " :: " in clean_line:
-                        # Safely limit splits to 3
-                        p = [i.strip() for i in clean_line.split(" :: ", 3)]
-                        if len(p) in (3, 4):
-                            key_value_pairs[p[0]] = (p[1], p[2])
+                        if " :: " in clean_line:
+                            p = [i.strip() for i in clean_line.split(" :: ", 3)]
+                            if len(p) in (3, 4):
+                                key_value_pairs[p[0]] = (p[1], p[2])
+                            else:
+                                warning_key = f"{filename}:{line_num}"
+                                if warning_key not in _WARNED_ENTRIES:
+                                    logger.warning(f"xlink: Malformed entry in {filename}:{line_num} (Expected 3 or 4 parts). Check spaces around '::'. Line: '{clean_line}'", location=(env.docname, lineno))
+                                    _WARNED_ENTRIES.add(warning_key)
                         else:
                             warning_key = f"{filename}:{line_num}"
                             if warning_key not in _WARNED_ENTRIES:
-                                logger.warning(f"xlink: Malformed entry in {filename}:{line_num} (Expected 3 or 4 parts). Check spaces around '::'. Line: '{clean_line}'", location=(env.docname, lineno))
+                                logger.warning(f"xlink: Malformed entry in {filename}:{line_num} (Missing ' :: ' delimiter). Line: '{clean_line}'", location=(env.docname, lineno))
                                 _WARNED_ENTRIES.add(warning_key)
-                    else:
-                        warning_key = f"{filename}:{line_num}"
-                        if warning_key not in _WARNED_ENTRIES:
-                            logger.warning(f"xlink: Malformed entry in {filename}:{line_num} (Missing ' :: ' delimiter). Line: '{clean_line}'", location=(env.docname, lineno))
-                            _WARNED_ENTRIES.add(warning_key)
 
     if key not in key_value_pairs:
         msg = inliner.reporter.error(f'xlink ID "{key}" not found.', line=lineno)

@@ -31,10 +31,14 @@ class XLinkListDirective(Directive):
         'title-filter-regex': directives.unchanged,
         'files': directives.unchanged,
         'tags': directives.unchanged,
+        'query': directives.unchanged,
         'sort-by': lambda x: directives.choice(x, ('id', 'title')),
         'order': lambda x: directives.choice(x, ('asc', 'desc')),
         'group-by': directives.unchanged,
         'group-by-file': directives.flag,
+        'add-to-toctree': directives.flag,
+        'no-add-to-toctree': directives.flag,  
+        'id-prefix': directives.unchanged,
         'class': directives.class_option,
         'render-link-icon': lambda x: directives.choice(x, ('true', 'false')),
         'download-as-bookmarks': directives.unchanged,
@@ -138,6 +142,22 @@ class XLinkListDirective(Directive):
                     return True
         return False
 
+    def _get_description(self, current_path, section_descriptions):
+        """Safely retrieve descriptions avoiding collisions of identical section names."""
+        # 1. Try an exact match of the full path
+        if current_path in section_descriptions:
+            return section_descriptions[current_path]
+            
+        # 2. Try matching the end of the path (for file tuples nested under tags)
+        for key in section_descriptions:
+            if isinstance(key, tuple):
+                if len(current_path) >= len(key) and current_path[-len(key):] == key:
+                    return section_descriptions[key]
+                    
+        # 3. Fallback to basic string match (for generic tags)
+        k = current_path[-1]
+        return section_descriptions.get(k)
+
     def _build_bookmarks_html(self, tree, order, section_descriptions, hidden_paths, path_prefix=tuple(), indent_level=1):
         lines = []
         indent = "    " * indent_level
@@ -148,7 +168,6 @@ class XLinkListDirective(Directive):
             links.sort(key=lambda x: x[1].lower(), reverse=(order == 'desc'))
             
             for lid, title, url, raw_tags in links:
-                # Use the raw tags directly from the .xlink file
                 tags_attr = ",".join(raw_tags) if raw_tags else ""
                 lines.append(f'{indent}<DT><A HREF="{url}" ADD_DATE="{now}" TAGS="{tags_attr}">{title}</A>')
 
@@ -157,7 +176,8 @@ class XLinkListDirective(Directive):
             lines.append(f'{indent}<DT><H3 ADD_DATE="{now}" LAST_MODIFIED="{now}">{k}</H3>')
             
             current_path = path_prefix + (k,)
-            desc = section_descriptions.get(k)
+            desc = self._get_description(current_path, section_descriptions)
+            
             if desc and not self._is_path_hidden(current_path, hidden_paths):
                 clean_desc = desc.replace('\\n', ' ').strip()
                 lines.append(f'{indent}<DD>{clean_desc}')
@@ -168,7 +188,7 @@ class XLinkListDirective(Directive):
                 
         return lines
 
-    def _build_sphinx_nodes(self, tree, custom_classes, show_icon, env, target_setting, sort_by, order, section_descriptions, hidden_paths, path_prefix=tuple()):
+    def _build_sphinx_nodes(self, tree, custom_classes, show_icon, env, target_setting, sort_by, order, section_descriptions, hidden_paths, id_prefix, path_prefix=tuple()):
         nodes_list = []
         
         if '__links__' in tree:
@@ -194,22 +214,48 @@ class XLinkListDirective(Directive):
 
         keys = sorted([k for k in tree.keys() if k != '__links__'], reverse=(order == 'desc'))
         for k in keys:
-            section = nodes.section(ids=[nodes.make_id(k)])
+            current_path = path_prefix + (k,)
+            
+            # Generate ID using the FULL path to ensure identical section names don't collide
+            path_slug = "-".join([nodes.make_id(p) for p in current_path])
+            sec_id = f"{id_prefix}-{path_slug}" if id_prefix else path_slug
+            
+            section = nodes.section(ids=[sec_id])
             section['classes'].extend(custom_classes)
             section += nodes.title('', k)
             
-            current_path = path_prefix + (k,)
-            desc = section_descriptions.get(k)
+            desc = self._get_description(current_path, section_descriptions)
             
             if desc and not self._is_path_hidden(current_path, hidden_paths):
                 desc_container = nodes.container(classes=['xlink-tag-description'])
                 desc_container.extend(self._parse_rst(desc))
                 section += desc_container
             
-            section.extend(self._build_sphinx_nodes(tree[k], custom_classes, show_icon, env, target_setting, sort_by, order, section_descriptions, hidden_paths, current_path))
+            section.extend(self._build_sphinx_nodes(tree[k], custom_classes, show_icon, env, target_setting, sort_by, order, section_descriptions, hidden_paths, id_prefix, current_path))
             nodes_list.append(section)
             
         return nodes_list
+
+    def _get_folder_info(self, dirpath):
+        name = os.path.basename(dirpath)
+        desc = ""
+        xlink_meta_dir = os.path.join(dirpath, '.xlink')
+        
+        name_file = os.path.join(xlink_meta_dir, 'section-name.rst')
+        if os.path.isfile(name_file):
+            try:
+                with open(name_file, 'r', encoding='utf-8-sig') as f:
+                    name = f.read().strip()
+            except Exception: pass
+                
+        desc_file = os.path.join(xlink_meta_dir, 'section-description.rst')
+        if os.path.isfile(desc_file):
+            try:
+                with open(desc_file, 'r', encoding='utf-8-sig') as f:
+                    desc = f.read().strip()
+            except Exception: pass
+                
+        return name, desc
 
     def run(self):
         env = self.state.document.settings.env
@@ -233,37 +279,27 @@ class XLinkListDirective(Directive):
                 return str(val), ""
             return str(t), ""
 
-        # Parse ID filters
         id_regexes = []
         id_regex_input = self.options.get('id-filter-regex') or self.options.get('id-starts-with')
         if id_regex_input:
             for p in id_regex_input.split(','):
-                try:
-                    id_regexes.append(re.compile(p.strip()))
-                except re.error as e:
-                    logger.warning(f"xlink: Invalid ID regex '{p.strip()}': {e}", location=(env.docname, self.lineno))
+                try: id_regexes.append(re.compile(p.strip()))
+                except re.error as e: logger.warning(f"xlink: Invalid ID regex '{p.strip()}': {e}", location=(env.docname, self.lineno))
 
-        # Parse URL filters
         url_regexes = []
         url_regex_input = self.options.get('url-filter-regex')
         if url_regex_input:
             for p in url_regex_input.split(','):
-                try:
-                    url_regexes.append(re.compile(p.strip()))
-                except re.error as e:
-                    logger.warning(f"xlink: Invalid URL regex '{p.strip()}': {e}", location=(env.docname, self.lineno))
+                try: url_regexes.append(re.compile(p.strip()))
+                except re.error as e: logger.warning(f"xlink: Invalid URL regex '{p.strip()}': {e}", location=(env.docname, self.lineno))
 
-        # Parse Title filters
         title_regexes = []
         title_regex_input = self.options.get('title-filter-regex')
         if title_regex_input:
             for p in title_regex_input.split(','):
-                try:
-                    title_regexes.append(re.compile(p.strip()))
-                except re.error as e:
-                    logger.warning(f"xlink: Invalid Title regex '{p.strip()}': {e}", location=(env.docname, self.lineno))
+                try: title_regexes.append(re.compile(p.strip()))
+                except re.error as e: logger.warning(f"xlink: Invalid Title regex '{p.strip()}': {e}", location=(env.docname, self.lineno))
 
-        # Parse allowed files and visibility modifiers
         allowed_files = None
         hidden_file_bases = set()
         if self.options.get('files'):
@@ -271,12 +307,10 @@ class XLinkListDirective(Directive):
             for f in self.options.get('files').split(','):
                 f = f.strip()
                 hide_file = False
-                
-                # Check for prefix bang! Only
                 if f.startswith('!'):
                     f = f[1:].strip()
                     hide_file = True
-                
+                f = f.replace('\\', '/')
                 allowed_files.append(f)
                 if hide_file:
                     hidden_file_bases.add(f)
@@ -294,7 +328,6 @@ class XLinkListDirective(Directive):
                 for t_key, t_data in node_dict.items():
                     resolved_name, _ = resolve_tag(t_key)
                     current_path = path_prefix + (resolved_name,)
-                    
                     if t_data['hide']:
                         hidden_paths.add(current_path)
                     _populate_hidden_paths(t_data['children'], current_path)
@@ -305,67 +338,146 @@ class XLinkListDirective(Directive):
         show_icon = self.options.get('render-link-icon', str(config.xlink_list_render_link_icon)).lower() == 'true'
         sort_by = self.options.get('sort-by', 'title')
         order = self.options.get('order', 'asc')
+
+        builder_name = getattr(env.app.builder, 'name', '')
+        add_to_toctree_default = builder_name in config.xlink_add_to_toctree_builders
         
+        add_to_toctree = add_to_toctree_default
+        if 'add-to-toctree' in self.options:
+            add_to_toctree = True
+        if 'no-add-to-toctree' in self.options:
+            add_to_toctree = False
+        
+        id_prefix = self.options.get('id-prefix')
+        if id_prefix is None:
+            id_prefix = f"xlink-{env.new_serialno('xlink-list')}"
+        else:
+            id_prefix = id_prefix.strip()
+
         group_by_raw = self.options.get('group-by', 'file' if 'group-by-file' in self.options else '')
         group_by_opts = [g.strip().lower() for g in group_by_raw.split(',')] if group_by_raw else []
 
         is_bookmark_mode = 'download-as-bookmarks' in self.options
         should_render_list = not is_bookmark_mode or 'render-list-with-bookmarks' in self.options
+        
+        query_string = self.options.get('query')
+        if query_string:
+            query_string = query_string.strip()
+            if query_string.startswith(':query:'):
+                query_string = query_string[7:].strip()
+                warning_key = f"duplicate_query_prefix:{self.lineno}"
+                if warning_key not in _WARNED_ENTRIES:
+                    logger.warning(f"xlink: Detected accidental ':query:' prefix in the query string. "
+                                   f"This is likely a copy-paste mistake. Automatically stripped it and evaluating as: '{query_string}'", 
+                                   location=(env.docname, self.lineno))
+                    _WARNED_ENTRIES.add(warning_key)
 
         tree_data = {}
         section_descriptions = {}  
         links_for_checking = []
         
-        for filename in sorted(os.listdir(source_directory)):
-            if filename.endswith('.xlink'):
-                file_base = filename[:-6]
-                if allowed_files is not None and file_base not in allowed_files:
-                    continue
-
-                filepath = os.path.join(source_directory, filename)
-                env.note_dependency(filepath)
-                file_section_name, _, file_desc = self._get_section_info(filepath)
+        for root, dirs, files in os.walk(source_directory):
+            if '.xlink' in dirs:
+                dirs.remove('.xlink')
                 
-                if file_desc:
-                    section_descriptions[file_section_name] = file_desc
-                if file_base in hidden_file_bases:
-                    hidden_paths.add((file_section_name,))
-                
-                with open(filepath, "r", encoding="utf-8-sig") as f:
-                    for line_num, line in enumerate(f, 1):
-                        clean_line = line.strip()
-                        if not clean_line or clean_line.startswith('#'):
-                            continue
+            for filename in sorted(files):
+                if filename.endswith('.xlink'):
+                    filepath = os.path.join(root, filename)
+                    rel_path = os.path.relpath(filepath, source_directory)
+                    rel_file_base = os.path.splitext(rel_path)[0].replace(os.sep, '/')
+                    
+                    path_parts = rel_path.split(os.sep)
+                    folder_parts = path_parts[:-1]
+                    
+                    current_dir = source_directory
+                    resolved_folder_path = []
+                    for p in folder_parts:
+                        current_dir = os.path.join(current_dir, p)
+                        f_name, f_desc = self._get_folder_info(current_dir)
+                        resolved_folder_path.append(f_name)
+                        
+                        # Tie description to the absolute folder hierarchy tuple
+                        if f_desc:
+                            section_descriptions[tuple(resolved_folder_path)] = f_desc
+                    
+                    if allowed_files is not None and rel_file_base not in allowed_files:
+                        continue
 
-                        if " :: " in clean_line:
-                            parts = [p.strip() for p in clean_line.split(" :: ", 3)]
-                            if len(parts) in (3, 4):
-                                lid, title, url = parts[:3]
-                                raw_tags = [t.strip() for t in parts[3].split(',')] if len(parts) == 4 else []
-                                
-                                valid_tags = []
-                                for t in raw_tags:
-                                    if not t: continue
-                                    if config.xlink_allowed_tags and t not in config.xlink_allowed_tags:
-                                        warning_key = f"{filename}:{line_num}:tag:{t}"
-                                        if warning_key not in _WARNED_ENTRIES:
-                                            logger.warning(f"xlink: Unknown tag '{t}' in {filename}:{line_num}. Define the tag in conf.py:xlink_allowed_tags", location=(env.docname, self.lineno))
-                                            _WARNED_ENTRIES.add(warning_key)
-                                    else:
-                                        valid_tags.append(t)
-                                
-                                if parsed_tags_filter is not None:
-                                    valid_tags = [t for t in valid_tags if t in all_allowed_tags]
-                                    if not valid_tags:
+                    env.note_dependency(filepath)
+                    file_section_name, _, file_desc = self._get_section_info(filepath)
+                    
+                    # Tie file descriptions and hidden states to the absolute file hierarchy tuple
+                    file_tuple = tuple(resolved_folder_path) + (file_section_name,)
+                    
+                    if file_desc:
+                        section_descriptions[file_tuple] = file_desc
+                    if rel_file_base in hidden_file_bases:
+                        hidden_paths.add(file_tuple)
+                    
+                    with open(filepath, "r", encoding="utf-8-sig") as f:
+                        for line_num, line in enumerate(f, 1):
+                            clean_line = line.strip()
+                            if not clean_line or clean_line.startswith('#'): continue
+
+                            if " :: " in clean_line:
+                                parts = [p.strip() for p in clean_line.split(" :: ", 3)]
+                                if len(parts) in (3, 4):
+                                    lid, title, url = parts[:3]
+                                    raw_tags = [t.strip() for t in parts[3].split(',')] if len(parts) == 4 else []
+                                    
+                                    valid_tags = []
+                                    for t in raw_tags:
+                                        if not t: continue
+                                        if config.xlink_allowed_tags and t not in config.xlink_allowed_tags:
+                                            warning_key = f"{filename}:{line_num}:tag:{t}"
+                                            if warning_key not in _WARNED_ENTRIES:
+                                                logger.warning(f"xlink: Unknown tag '{t}' in {filename}:{line_num}. Define the tag in conf.py:xlink_allowed_tags", location=(env.docname, self.lineno))
+                                                _WARNED_ENTRIES.add(warning_key)
+                                        else:
+                                            valid_tags.append(t)
+                                    
+                                    if parsed_tags_filter is not None:
+                                        valid_tags = [t for t in valid_tags if t in all_allowed_tags]
+                                        if not valid_tags:
+                                            continue
+                                    
+                                    id_match = not id_regexes or any(r.search(lid) for r in id_regexes)
+                                    url_match = not url_regexes or any(r.search(url) for r in url_regexes)
+                                    title_match = not title_regexes or any(r.search(title) for r in title_regexes)
+                                    
+                                    if not (id_match and url_match and title_match):
                                         continue
-                                
-                                # Apply Logical AND for all regex filters
-                                id_match = not id_regexes or any(r.search(lid) for r in id_regexes)
-                                url_match = not url_regexes or any(r.search(url) for r in url_regexes)
-                                title_match = not title_regexes or any(r.search(title) for r in title_regexes)
-                                
-                                if id_match and url_match and title_match:
-                                    links_for_checking.append((lid, title, url, filename))
+
+                                    if query_string:
+                                        eval_locals = {
+                                            'link_id': lid,
+                                            'title': title,
+                                            'url': url,
+                                            'tags': set(valid_tags),
+                                            'filename': rel_file_base,
+                                            'section_name': file_section_name,
+                                            'section_desc': file_desc,
+                                            're': re
+                                        }
+                                        safe_builtins = {
+                                            'any': any,
+                                            'all': all,
+                                            'bool': bool,
+                                            'set': set,
+                                            'len': len,
+                                        }
+                                        try:
+                                            match = eval(query_string, {"__builtins__": safe_builtins}, eval_locals)
+                                            if not match:
+                                                continue
+                                        except Exception as e:
+                                            warning_key = f"query_error:{query_string}"
+                                            if warning_key not in _WARNED_ENTRIES:
+                                                logger.warning(f"xlink: Query evaluation failed for '{query_string}': {e}", location=(env.docname, self.lineno))
+                                                _WARNED_ENTRIES.add(warning_key)
+                                            continue
+
+                                    links_for_checking.append((lid, title, url, f"{rel_file_base}.xlink"))
                                     
                                     paths = []
                                     def _find_paths(node_dict, link_tags):
@@ -405,15 +517,15 @@ class XLinkListDirective(Directive):
                                     if not group_by_opts:
                                         paths.append(tuple()) 
                                     elif group_by_opts == ['file']:
-                                        paths.append((file_section_name,))
+                                        paths.append(file_tuple)
                                     elif group_by_opts == ['tag']:
                                         paths.extend(get_tag_paths(valid_tags))
                                     elif group_by_opts == ['file', 'tag']:
                                         for tp in get_tag_paths(valid_tags):
-                                            paths.append((file_section_name,) + tp)
+                                            paths.append(file_tuple + tp)
                                     elif group_by_opts == ['tag', 'file']:
                                         for tp in get_tag_paths(valid_tags):
-                                            paths.append(tp + (file_section_name,))
+                                            paths.append(tp + file_tuple)
                                     else:
                                         paths.append(tuple())
 
@@ -425,18 +537,17 @@ class XLinkListDirective(Directive):
                                             current = current[level]
                                         if '__links__' not in current:
                                             current['__links__'] = []
-                                        # Append the actual valid_tags to the tuple here!
                                         current['__links__'].append((lid, title, url, valid_tags))
+                                else:
+                                    warning_key = f"{filename}:{line_num}"
+                                    if warning_key not in _WARNED_ENTRIES:
+                                        logger.warning(f"xlink: Malformed entry in {filename}:{line_num} (Expected 3 or 4 parts). Check spaces around '::'. Line: '{clean_line}'", location=(env.docname, self.lineno))
+                                        _WARNED_ENTRIES.add(warning_key)
                             else:
                                 warning_key = f"{filename}:{line_num}"
                                 if warning_key not in _WARNED_ENTRIES:
-                                    logger.warning(f"xlink: Malformed entry in {filename}:{line_num} (Expected 3 or 4 parts). Check spaces around '::'. Line: '{clean_line}'", location=(env.docname, self.lineno))
+                                    logger.warning(f"xlink: Malformed entry in {filename}:{line_num} (Missing ' :: ' delimiter). Line: '{clean_line}'", location=(env.docname, self.lineno))
                                     _WARNED_ENTRIES.add(warning_key)
-                        else:
-                            warning_key = f"{filename}:{line_num}"
-                            if warning_key not in _WARNED_ENTRIES:
-                                logger.warning(f"xlink: Malformed entry in {filename}:{line_num} (Missing ' :: ' delimiter). Line: '{clean_line}'", location=(env.docname, self.lineno))
-                                _WARNED_ENTRIES.add(warning_key)
 
         if config.xlink_check_links:
             self._check_links(links_for_checking, config.xlink_check_timeout)
@@ -476,24 +587,31 @@ class XLinkListDirective(Directive):
                     bookmark_node = nodes.reference('', '', internal=False, refuri=ext_url, classes=['xlink-bookmark-button', 'external'])
                     bookmark_node += nodes.Text(f"Download {bookmark_folder} (.html)")
 
-        list_container = None
+        rendered_nodes = []
         if should_render_list:
-            list_container = nodes.container(classes=['xlink-list-container'] + custom_classes)
             if '__links__' in tree_data and len(tree_data) == 1:
                 clean_tree = {'All Links': tree_data} if 'group-by' in self.options else tree_data
-                list_container.extend(self._build_sphinx_nodes(clean_tree, custom_classes, show_icon, env, target_setting, sort_by, order, section_descriptions, hidden_paths))
+                rendered_nodes = self._build_sphinx_nodes(clean_tree, custom_classes, show_icon, env, target_setting, sort_by, order, section_descriptions, hidden_paths, id_prefix)
             else:
-                list_container.extend(self._build_sphinx_nodes(tree_data, custom_classes, show_icon, env, target_setting, sort_by, order, section_descriptions, hidden_paths))
+                rendered_nodes = self._build_sphinx_nodes(tree_data, custom_classes, show_icon, env, target_setting, sort_by, order, section_descriptions, hidden_paths, id_prefix)
 
         result_nodes = []
         button_pos = self.options.get('render-list-with-bookmarks', 'before')
 
-        if button_pos == 'before':
-            if bookmark_node: result_nodes.append(bookmark_node)
-            if list_container: result_nodes.append(list_container)
+        if add_to_toctree:
+            if button_pos == 'before' and bookmark_node: result_nodes.append(bookmark_node)
+            result_nodes.extend(rendered_nodes)
+            if button_pos == 'after' and bookmark_node: result_nodes.append(bookmark_node)
         else:
-            if list_container: result_nodes.append(list_container)
-            if bookmark_node: result_nodes.append(bookmark_node)
+            list_container = nodes.container(classes=['xlink-list-container'] + custom_classes)
+            list_container.extend(rendered_nodes)
+            
+            if button_pos == 'before':
+                if bookmark_node: result_nodes.append(bookmark_node)
+                if list_container: result_nodes.append(list_container)
+            else:
+                if list_container: result_nodes.append(list_container)
+                if bookmark_node: result_nodes.append(bookmark_node)
 
         return result_nodes
 

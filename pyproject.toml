@@ -1,6 +1,6 @@
 [project]
 name = "sphinxcontrib-xlink"
-version = "1.0.0"
+version = "1.1.0"
 description = "A Sphinx extension for external link management via .xlink files."
 readme = "README.md"
 authors = [{name = "Jens Frey", email = "jens.frey@coffeecrew.org"}]
@@ -11,6 +11,13 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
 ]
+
+[project.urls]
+Homepage = "https://github.com/authsec/sphinxcontrib-xlink"
+Documentation = "https://github.com/authsec/sphinxcontrib-xlink#readme"
+Repository = "https://github.com/authsec/sphinxcontrib-xlink.git"
+Issues = "https://github.com/authsec/sphinxcontrib-xlink/issues"
+Changelog = "https://github.com/authsec/sphinxcontrib-xlink/releases"
 
 [project.optional-dependencies]
 test = [
