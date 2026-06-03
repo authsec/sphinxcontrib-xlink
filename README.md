@@ -4,19 +4,111 @@
 
 It also supercharges your authoring experience with a custom VSCode snippet engine that provides instant autocomplete for external links, glossary terms, document section headers, tags, files, and **Sphinx-Needs dynamic functions**.
 
+## Interactive Bookmark Search (HTML only)
+
+> **Important**: The search feature only works with **HTML output** (`html`, `dirhtml`, `singlehtml`, `readthedocs` builders). It renders a client-side JavaScript widget that is not available in LaTeX/PDF or other non-HTML builders.
+
+The `.. xlink-search::` directive embeds a fully interactive, real-time search interface directly into your documentation. Readers can instantly search, filter, and navigate your entire link database without leaving the page.
+
+### Key Capabilities
+
+* **Instant fuzzy search** across link titles, IDs, tags, and URLs
+* **Smart tag filtering** with `tag:` prefix — matches against tag slugs, display names, *and* descriptions
+* **Tag exclusion** with `-tag:` or `!tag:` prefix
+* **URL filtering** with `inurl:` and exclusion with `-inurl:` or `!inurl:`
+* **Autocomplete dropdown** for tag names as you type `tag:`
+* **Match context highlights** showing *why* a tag matched (displays the tag's display name and description with the matching term highlighted)
+* **Full keyboard navigation** — Arrow keys, Tab, Enter to open links, Shift+Enter to copy `:xlink:` role to clipboard
+* **Global keyboard shortcut** — `⌘+⇧+K` (Mac) / `Ctrl+Shift+K` (Windows/Linux) to focus or open search
+* **Configurable results per page** with persistent localStorage preference
+* **Overlay mode** — renders as a modal dialog triggered by keyboard shortcut
+* **Custom styling** via CSS classes
+
+### Basic Usage
+
+```rst
+.. xlink-search::
+```
+
+This renders a full-width search bar with a paginated results table containing all links from your `.xlink` files.
+
+### Configuration Examples
+
+**Custom title and page sizes:**
+
+```rst
+.. xlink-search::
+   :title: Project Bookmark Search
+   :results: 5, 10, 25, 50
+```
+
+**Overlay mode** (hidden by default, opened via `⌘+⇧+K`):
+
+```rst
+.. xlink-search::
+   :overlay:
+   :title: Quick Link Finder
+   :results: 10, 25, 50, 100
+```
+
+**Custom CSS class for styling:**
+
+```rst
+.. xlink-search::
+   :class: my-custom-search
+   :title: Engineering Links
+   :results: 20, 50
+```
+
+### Search Syntax
+
+Users can combine multiple search operators in a single query:
+
+| Syntax | Description | Example |
+| --- | --- | --- |
+| `<text>` | Free-text search on title and ID | `api docs` |
+| `tag:<term>` | Include links with matching tag (slug, name, or description) | `tag:engineer` |
+| `-tag:<term>` or `!tag:<term>` | Exclude links with matching tag | `-tag:internal` |
+| `inurl:<term>` | Include links whose URL contains the term | `inurl:github.com` |
+| `-inurl:<term>` or `!inurl:<term>` | Exclude links whose URL contains the term | `-inurl:internal.corp` |
+
+**Combined example**: `api tag:engineer -tag:internal inurl:github.com` finds links with "api" in the title, tagged with something matching "engineer", excluding "internal" tags, and whose URL contains "github.com".
+
+### Keyboard Shortcuts (within the search widget)
+
+| Key | Action |
+| --- | --- |
+| `⌘+⇧+K` / `Ctrl+Shift+K` | Focus search input (or open overlay) |
+| `↓` / `↑` | Navigate results table |
+| `Tab` / `Shift+Tab` | Move selection forward/backward |
+| `Enter` | Open selected link in new tab |
+| `Shift+Enter` | Copy `:xlink:\`id\`` to clipboard |
+| `Escape` | Clear search / deselect / close overlay |
+| Type any letter (while table focused) | Return focus to search input |
+
+### Directive Options
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `:title:` | String | Header text displayed above the search bar |
+| `:results:` | Comma-separated integers | Page size options for the dropdown (default: `10, 25, 50, 100`) |
+| `:overlay:` | Flag | Renders as a hidden overlay/modal, toggled via keyboard shortcut |
+| `:class:` | String | Custom CSS classes on the container |
+
+---
+
 ## Features
 
 * **Centralized Management**: Store URLs, titles, and tags in simple, structured text files (`.xlink`).
 * **Deep Folder Structures**: Recursively organize your `.xlink` files into nested directories. Create a hidden `.xlink` folder containing `section-name.rst` and `section-description.rst` to seamlessly generate rich metadata for an entire directory tree.
+* **Interactive Search** *(HTML only)*: Embed a real-time, keyboard-navigable search interface with tag autocomplete and fuzzy matching.
 * **Native Toctree Integration**: Automatically inject your generated link hierarchies directly into the Sphinx `toctree`, allowing them to appear in your sidebar navigation.
 * **Collision-Proof Namespaces**: Safely handles duplicate filenames (e.g., `examples/example1.xlink` and `other/example1.xlink`) and identically named sections by automatically tracking relative paths and generating full-path HTML anchor IDs.
 * **Python Expression Engine**: Filter your link database dynamically using a secure Python evaluation engine (e.g., `:query: "code" in tags and re.search('api', url)`).
 * **N-Depth Tag Hierarchies**: Build complex, multi-level grouped lists using a powerful nested tag syntax (e.g., `manager[tracking[internal]]`).
 * **Rich reST Descriptions**: Inject reStructuredText-formatted descriptions into your file and tag categories for annotated link directories.
 * **Surgical Description Control**: Use `!file` and `!tag` modifiers to hide descriptions for specific files, tags, or entire sub-trees based on their hierarchy path.
-* **Regex & Tag Filtering**: Dynamically pull subsets of links using regular expressions on IDs, URLs, Titles, or specific tag intersections.
 * **Native Sphinx-Needs Support**: Integrates directly with `sphinx-needs` dynamic functions and `needs_string_links` to make external links clickable in metadata tables.
-* **Glossary & Reference Autocomplete**: Automatically generates VSCode snippets for your Sphinx glossary terms and section headers, magically resolving them inline without requiring boilerplate `replace` directives.
 * **Intelligent VSCode Snippets**: Automatically generates a `.vscode` snippet file customized to your project, resolving links, terms, section headers, tags, and files inline without requiring boilerplate `replace` directives.
 * **Bookmark Generation**: Generate Netscape Bookmark HTML files with native browser tag support.
 * **LaTeX/PDF URL Control**: Target how URLs are rendered in PDFs (inline, footnotes, or hidden).
@@ -30,7 +122,6 @@ Install the package via pip:
 
 ```bash
 pip install sphinxcontrib-xlink
-
 ```
 
 Add the extension to your `conf.py`:
@@ -38,9 +129,8 @@ Add the extension to your `conf.py`:
 ```python
 extensions = [
     'sphinxcontrib.xlink',
-    'sphinx_needs', # Optional: for dynamic function support
+    'sphinx_needs',  # Optional: for dynamic function support
 ]
-
 ```
 
 ---
@@ -52,14 +142,15 @@ You don't need anything specific in your config to get started. Simply create an
 ```text
 # xlink-section-name: Test File
 # xlink-section-description: Here you can add a description, with\n\nline breaks **and** rst formatting.
-test-mail :: Company Mail App :: https://companymail.example.com
+
+unique-id :: Link Title :: Link Location :: tag1, tag2, taggroup1:sub1, taggroup1:sub2, taggroup2:sub1, taggroup2:sub2,
+test-mail :: Company Mail App :: https://companymail.example.com :: tool:mail, dept:communications
 ```
 
 Reference the new link in your `.rst` file:
 
 ```rst
 :xlink:`test-mail`
-
 ```
 
 ### Full Configuration Options
@@ -68,7 +159,7 @@ Below you can find the available configuration options to customize `sphinxcontr
 
 ```python
 # Directory containing .xlink files (Defaults to 'xlinks' relative to conf.py)
-xlink_directory = '../xlinks'  
+xlink_directory = '../xlinks'
 
 # Hierarchical Tagging & Rich Descriptions
 # Defaults to {} to avoid arbitrary tags and typos. Making tags explicit is recommended.
@@ -77,6 +168,7 @@ xlink_allowed_tags = {
     'engineer': ('Software Engineer', 'Resources for the **technical** staff.'),
     'manager': ('Project Management', 'Links for tracking *milestones* and budgets.'),
     'tracking': ('Tracking Tools', 'Centralized apps for project health.'),
+    'tool:mail': ('Mail Tools', 'Communication Suite, SMTP Tooling'),
     'internal': 'Internal Only',
     'external': 'Third-Party Services'
 }
@@ -87,32 +179,58 @@ xlink_add_to_toctree_builders = ['html', 'dirhtml', 'singlehtml', 'readthedocs']
 
 # Sphinx-Needs Integration
 # Specify which metadata fields should automatically use the xlink clickable mapping
-# Defaults to ['xlink']
 xlink_needs_string_link_options = ['xlink', 'documentation', 'python-docs']
 
 # Fallback name for untagged links
-# Defaults to 'Untagged'
 xlink_default_untagged_name = 'Uncategorized Links'
 
-# Developer Experience (VSCode)
-# Defaults to True
+# Developer Experience (VSCode snippets generation)
 xlink_generate_vscode_snippets = True
 
 # Quality Assurance & URL Validation
-# Defaults to False
 xlink_check_links = False
-# Defaults to 5.0 (seconds)
 xlink_check_timeout = 5.0
 
 # PDF/LaTeX Output Control ('no', 'inline', 'footnote')
-xlink_latex_show_urls = 'no' 
+xlink_latex_show_urls = 'no'
 
 # Visual Enhancements
-# Defaults to True
 xlink_render_link_icon = True
-# Defaults to False
 xlink_list_render_link_icon = False
+```
 
+### Configuration Examples by Use Case
+
+**Minimal setup** (just links, no tags):
+
+```python
+extensions = ['sphinxcontrib.xlink']
+xlink_directory = 'xlinks'
+```
+
+**Strict tag governance** (prevents typos, enables search descriptions):
+
+```python
+xlink_allowed_tags = {
+    'frontend': ('Frontend', 'UI frameworks and component libraries'),
+    'backend': ('Backend', 'Server-side APIs and microservices'),
+    'devops': ('DevOps', 'CI/CD, containers, and infrastructure'),
+}
+xlink_generate_vscode_snippets = True  # Tags appear in autocomplete
+```
+
+**PDF-optimized output** (show URLs as footnotes in LaTeX):
+
+```python
+xlink_latex_show_urls = 'footnote'
+xlink_render_link_icon = False  # Icons don't render in PDF
+```
+
+**CI/CD link validation** (check for broken links during build):
+
+```python
+xlink_check_links = True
+xlink_check_timeout = 10.0
 ```
 
 ---
@@ -133,7 +251,6 @@ xlinks/
 │   ├── example1.xlink               <-- Addressed as 'examples/example1'
 │   └── subxample/
 │       └── example2.xlink           <-- Addressed as 'examples/subxample/example2'
-
 ```
 
 ### 1. Adding to the Toctree
@@ -144,7 +261,6 @@ If you want these folders and files to act like native chapters in your document
 .. xlink-list::
    :group-by: file
    :add-to-toctree:
-
 ```
 
 *Note: Because `html` is in the `xlink_add_to_toctree_builders` config by default, you often don't even need to specify the flag manually for HTML builds! You can override this locally using `:no-add-to-toctree:`.*
@@ -157,7 +273,6 @@ To target or hide specific files when dealing with complex directories, always u
 .. xlink-list::
    :group-by: file
    :files: example1, examples/example1, !examples/subxample/example2
-
 ```
 
 *Prefixing a file with `!` (e.g., `!examples/subxample/example2`) will show the links inside it, but suppress the file's metadata description.*
@@ -170,7 +285,6 @@ If you render multiple `xlink-list` directives on the same page grouped by the s
 .. xlink-list::
    :id-prefix: custom-prefix
    :group-by: file
-
 ```
 
 ---
@@ -207,6 +321,8 @@ The engine injects the following variables into the evaluation context:
 * `section_desc` (str)
 * `re` (module) — *For regex matching*
 
+Safe builtins available: `any`, `all`, `bool`, `set`, `len`.
+
 ### Exhaustive Query Examples
 
 Here is how you can achieve complex filtering logic using natural Python syntax:
@@ -214,7 +330,6 @@ Here is how you can achieve complex filtering logic using natural Python syntax:
 ```rst
 .. xlink-list::
    :query: <insert-expression-here>
-
 ```
 
 | Goal | Python `:query:` Expression |
@@ -258,7 +373,6 @@ Using the `xlink` dynamic function allows you to pull URLs from your `.xlink` fi
 .. dr:: My decision
    :id: DR-0001
    :xlink: [[ xlink('example-repo') ]]
-
 ```
 
 **Multiple Links:**
@@ -268,8 +382,11 @@ You can pass multiple IDs as a comma-separated string.
 .. dr:: Complex decision
    :id: DR-0002
    :xlink: [[ xlink('example-repo, example-mail') ]]
-
 ```
+
+Additional dynamic functions are also registered:
+* `[[ xlink_url('id') ]]` — returns only the URL
+* `[[ xlink_title('id') ]]` — returns only the title
 
 ### 3. Hierarchical Tag Grouping
 
@@ -280,7 +397,6 @@ Create deeply nested structures. Use `!tag` (Single) and `tag!!` (Cascade) to co
    :files: !example1, examples/example2
    :tags: !engineer[code, productivity-apps], manager!![tracking[internal]]
    :group-by: tag
-
 ```
 
 **Modifier Logic:**
@@ -299,25 +415,44 @@ Generate a browser-compatible Netscape Bookmark `.html` file.
    :download-as-bookmarks: Project Reference Links
    :download-as-bookmarks-external-link: https://docs.example.com/bookmarks.html
    :render-list-with-bookmarks: after
-
 ```
 
 ### 5. Glossary Autocomplete & Auto-Resolution
 
 `sphinxcontrib-xlink` completely eliminates the boilerplate of referencing Glossary Terms. Type `ddxt-` in VSCode and select your term. The extension natively transforms the placeholder into a cross-reference—no `.. |replace|` directives required!
 
-* `|xlink-term-smap|` ➔ Renders as: [SMAP](https://www.google.com/search?q=%23)
-* `|xlink-term-smap-full|` ➔ Renders as: [Supervisor Mode Access Prevention (SMAP)](https://www.google.com/search?q=%23)
+* `|xlink-term-smap|` ➔ Renders as: [SMAP](#)
+* `|xlink-term-smap-full|` ➔ Renders as: [Supervisor Mode Access Prevention (SMAP)](#)
 
 ### 6. Document Reference Autocomplete
 
 The extension automatically assigns a normalized anchor label to **every section header** in your entire project. Type `ddxr-` in VSCode and select it.
 
-* `|xlink-ref-file-filtering|` ➔ Renders as: [File filtering](https://www.google.com/search?q=%23)
+* `|xlink-ref-file-filtering|` ➔ Renders as: [File filtering](#)
+
+### 7. Interactive Search Widget (HTML only)
+
+Add a searchable, filterable table of all your links:
+
+```rst
+.. xlink-search::
+   :title: Find a Bookmark
+   :results: 10, 25, 50
+```
+
+Or as a hidden overlay triggered by `⌘+⇧+K`:
+
+```rst
+.. xlink-search::
+   :overlay:
+   :title: Quick Search
+```
 
 ---
 
 ## Directive Options Reference
+
+### `.. xlink-list::` Options
 
 | Option | Value Type | Description |
 | --- | --- | --- |
@@ -332,7 +467,7 @@ The extension automatically assigns a normalized anchor label to **every section
 | `:sort-by:` | `id` or `title` | Sort links within their group. |
 | `:order:` | `asc` or `desc` | Sort direction. |
 | `:download-as-bookmarks:` | String | Generates a downloadable bookmark `.html` file. |
-| `:download-as-bookmarks-external-link:` | URL | Fallback URL for the bookmark file. |
+| `:download-as-bookmarks-external-link:` | URL | Fallback URL for the bookmark file (used in non-HTML builders). |
 | `:render-list-with-bookmarks:` | `before` / `after` | Position of the download button relative to the list. |
 | `:latex-show-urls:` | `inline`, `footnote`, `no` | LaTeX/PDF URL rendering style for this list. |
 | `:render-link-icon:` | `true` or `false` | Override the global icon config for this specific list. |
@@ -340,3 +475,19 @@ The extension automatically assigns a normalized anchor label to **every section
 | `:add-to-toctree:` | Flag | Append list sections to the Sphinx document TOC directly. |
 | `:no-add-to-toctree:` | Flag | Prevents TOC integration (overrides `conf.py` default). |
 | `:id-prefix:` | String | Custom prefix for HTML anchor IDs. Defaults to an auto-incrementing ID. |
+
+### `.. xlink-search::` Options (HTML only)
+
+| Option | Value Type | Description |
+| --- | --- | --- |
+| `:title:` | String | Header text displayed above the search bar. |
+| `:results:` | Comma-separated integers | Page size options for the results dropdown (default: `10, 25, 50, 100`). |
+| `:overlay:` | Flag | Render as a hidden modal overlay, toggled via `⌘+⇧+K` / `Ctrl+Shift+K`. |
+| `:class:` | String | Custom CSS classes applied to the search container. |
+
+### `:xlink:` Role
+
+| Syntax | Result |
+| --- | --- |
+| `` :xlink:`link-id` `` | Renders with the title defined in the `.xlink` file |
+| `` :xlink:`Custom Text <link-id>` `` | Renders with "Custom Text" as the label |

@@ -454,7 +454,7 @@ def cleanup_temp_files(app, exception):
 
 
 from .roles import xlink_role
-from .directives import XLinkListDirective
+from .directives import XLinkListDirective, XLinkSearchDirective
 
 def setup(app):
     app.add_config_value('xlink_directory', 'xlinks', 'env')
@@ -478,6 +478,7 @@ def setup(app):
     
     app.add_role('xlink', xlink_role)
     app.add_directive('xlink-list', XLinkListDirective)
+    app.add_directive('xlink-search', XLinkSearchDirective)
     
     app.connect('builder-inited', generate_vscode_snippets)
     app.connect('config-inited', register_needs_integration)
@@ -494,5 +495,6 @@ def setup(app):
     static_dir = os.path.join(package_dir, 'static')
     app.connect('builder-inited', lambda app: app.config.html_static_path.append(static_dir))
     app.add_css_file('xlink.css')
+    app.add_js_file('xlink-search.js')
 
-    return {'version': '1.1.0', 'parallel_read_safe': True, 'parallel_write_safe': True}
+    return {'version': '1.2.0', 'parallel_read_safe': True, 'parallel_write_safe': True}

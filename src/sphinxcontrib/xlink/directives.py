@@ -3,6 +3,7 @@ import re
 import datetime
 import urllib.request
 import urllib.error
+import json
 from docutils import nodes
 from docutils.statemachine import ViewList
 from docutils.parsers.rst import Directive, directives
@@ -634,3 +635,157 @@ class XLinkListDirective(Directive):
         
         description = "\n".join(desc_lines)
         return name, has_name, description
+
+class XLinkSearchDirective(Directive):
+    has_content = False
+    option_spec = {
+        'class': directives.class_option,
+        'title': directives.unchanged,
+        'results': directives.unchanged,
+        'overlay': directives.flag,
+    }
+
+    def run(self):
+        env = self.state.document.settings.env
+        config = env.config
+        
+        source_directory = os.path.normpath(os.path.join(env.srcdir, config.xlink_directory))
+        
+        if not os.path.isdir(source_directory):
+            return [self.state.document.reporter.warning(f"xlink directory not found: {source_directory}")]
+
+        all_links = []
+        tags_set = set()
+
+        for root, dirs, files in os.walk(source_directory):
+            if '.xlink' in dirs:
+                dirs.remove('.xlink')
+                
+            for filename in sorted(files):
+                if filename.endswith('.xlink'):
+                    filepath = os.path.join(root, filename)
+                    env.note_dependency(filepath)
+                    
+                    with open(filepath, "r", encoding="utf-8-sig") as f:
+                        for line in f:
+                            clean_line = line.strip()
+                            if not clean_line or clean_line.startswith('#'): continue
+
+                            if " :: " in clean_line:
+                                parts = [p.strip() for p in clean_line.split(" :: ", 3)]
+                                if len(parts) in (3, 4):
+                                    lid, title, url = parts[:3]
+                                    raw_tags = [t.strip() for t in parts[3].split(',')] if len(parts) == 4 else []
+                                    
+                                    valid_tags = []
+                                    for t in raw_tags:
+                                        if not t: continue
+                                        if config.xlink_allowed_tags and t not in config.xlink_allowed_tags:
+                                            pass
+                                        else:
+                                            valid_tags.append(t)
+                                            tags_set.add(t)
+                                            
+                                    all_links.append({
+                                        'id': lid,
+                                        'title': title,
+                                        'url': url,
+                                        'tags': valid_tags
+                                    })
+
+        allowed_keys = list(config.xlink_allowed_tags.keys()) if config.xlink_allowed_tags else []
+        all_display_tags = sorted(list(tags_set | set(allowed_keys)))
+
+        # Build tag definitions for fuzzy search in JS
+        tag_defs_payload = {}
+        if config.xlink_allowed_tags:
+            for slug, val in config.xlink_allowed_tags.items():
+                if isinstance(val, tuple) and len(val) >= 2:
+                    tag_defs_payload[slug] = {'name': val[0], 'desc': val[1]}
+                elif isinstance(val, tuple) and len(val) == 1:
+                    tag_defs_payload[slug] = {'name': val[0], 'desc': ''}
+                elif isinstance(val, str):
+                    tag_defs_payload[slug] = {'name': val, 'desc': ''}
+                else:
+                    tag_defs_payload[slug] = {'name': slug, 'desc': ''}
+
+        payload = {
+            'links': all_links,
+            'tags': all_display_tags,
+            'tag_defs': tag_defs_payload
+        }
+        
+        is_overlay = 'overlay' in self.options
+        container_classes = ['xlink-search-app'] + self.options.get('class', [])
+        if is_overlay:
+            container_classes.append('xlink-is-overlay')
+            
+        class_attr = ' '.join(container_classes)
+        
+        if 'title' in self.options:
+            title_html = f'<h4 style="margin: 0; color: var(--pst-color-primary, #2980b9);">{self.options["title"]}</h4>'
+        else:
+            title_html = ''
+        
+        results_raw = self.options.get('results', '10, 25, 50, 100')
+        results_list = []
+        for r in results_raw.split(','):
+            r = r.strip()
+            if r.isdigit():
+                results_list.append(int(r))
+        
+        results_list.sort()
+        if not results_list:
+            results_list = [10, 25, 50, 100]
+            
+        options_html = "\n                        ".join([f'<option value="{str(n)}">{str(n)}</option>' for n in results_list])
+        
+        ui_html = f'''
+        <div class="xlink-search-inner">
+            <div class="xlink-search-header-container" style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 0.8rem;">
+                {title_html}
+                <div class="xlink-search-controls" style="margin-bottom: 0;">
+                    <label class="xlink-search-pagesize-label">Results per page: 
+                        <select class="xlink-search-pagesize">
+                            {options_html}
+                        </select>
+                    </label>
+                </div>
+            </div>
+            <div class="xlink-search-bar-wrapper">
+                <i class="fa-solid fa-magnifying-glass xlink-search-icon"></i>
+                <input type="text" class="xlink-search-input" placeholder="Search bookmarks... (type 'tag:' to filter by tags, 'inurl:' to filter URLs)" autocomplete="off" />
+                <span class="xlink-search-shortcut" title="Focus Bookmark Search">
+                    <kbd class="kbd-shortcut__modifier">⌘</kbd>+<kbd class="kbd-shortcut__modifier">⇧</kbd>+<kbd>K</kbd>
+                </span>
+                <div class="xlink-autocomplete-dropdown" style="display: none;"></div>
+            </div>
+            
+            <div class="xlink-search-info" style="margin-bottom: 0.5rem; font-size: 0.9em; color: var(--pst-color-text-muted, #666);"></div>
+            <div class="xlink-search-table-wrapper">
+                <table class="xlink-search-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 40%">Name</th>
+                            <th style="width: 30%">Tags</th>
+                            <th style="width: 30%">Link</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="xlink-search-toast" style="display: none;">Copied to clipboard!</div>
+'''
+        import uuid
+        uid = str(uuid.uuid4()).replace('-', '')
+
+        html = f'''
+<div class="{class_attr}" id="xsa-{uid}">
+    {ui_html}
+</div>
+<script type="application/json" id="xsd-{uid}">
+{json.dumps(payload)}
+</script>
+'''
+        return [nodes.raw('', html, format='html')]
