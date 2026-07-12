@@ -242,14 +242,14 @@ class XLinkListDirective(Directive):
         desc = ""
         xlink_meta_dir = os.path.join(dirpath, '.xlink')
         
-        name_file = os.path.join(xlink_meta_dir, 'section-name.rst')
+        name_file = os.path.join(xlink_meta_dir, 'section-name.rsti')
         if os.path.isfile(name_file):
             try:
                 with open(name_file, 'r', encoding='utf-8-sig') as f:
                     name = f.read().strip()
             except Exception: pass
                 
-        desc_file = os.path.join(xlink_meta_dir, 'section-description.rst')
+        desc_file = os.path.join(xlink_meta_dir, 'section-description.rsti')
         if os.path.isfile(desc_file):
             try:
                 with open(desc_file, 'r', encoding='utf-8-sig') as f:

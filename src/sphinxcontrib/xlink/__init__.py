@@ -579,6 +579,36 @@ def _validate_tag_patterns(app, config):
     _compile_tag_patterns(config)
 
 
+def _validate_xlink_meta_files(app):
+    """Check for deprecated .rst files in .xlink metadata directories.
+
+    Since version 1.3.1, metadata files must use the .rsti extension to avoid
+    Sphinx toctree inclusion warnings. If any .rst files are found inside a
+    .xlink directory, the build is aborted with a clear error message.
+    """
+    from sphinx.errors import ExtensionError
+
+    source_dir = os.path.normpath(os.path.join(app.srcdir, app.config.xlink_directory))
+    if not os.path.isdir(source_dir):
+        return
+
+    offending_files = []
+    for root, dirs, files in os.walk(source_dir):
+        # Only inspect directories named '.xlink'
+        if os.path.basename(root) == '.xlink':
+            for f in files:
+                if f.endswith('.rst'):
+                    offending_files.append(os.path.join(root, f))
+
+    if offending_files:
+        file_list = '\n  '.join(offending_files)
+        raise ExtensionError(
+            f"sphinxcontrib-xlink: Found .rst files inside .xlink metadata directories. "
+            f"Since version 1.3.1, these files must use the .rsti extension to prevent "
+            f"Sphinx toctree warnings. Please rename the following files from .rst to .rsti:\n  {file_list}"
+        )
+
+
 from .roles import xlink_role
 from .directives import XLinkListDirective, XLinkSearchDirective
 from .bib import generate_bib_file
@@ -638,4 +668,6 @@ def setup(app):
     app.add_css_file('xlink.css')
     app.add_js_file('xlink-search.js')
 
-    return {'version': '1.3.0', 'parallel_read_safe': True, 'parallel_write_safe': True}
+    app.connect('builder-inited', _validate_xlink_meta_files)
+
+    return {'version': '1.3.1', 'parallel_read_safe': True, 'parallel_write_safe': True}
