@@ -1,0 +1,7 @@
+# xlink-section-name: Decisions
+dr1 :: Use PostgreSQL :: https://example.com/dr1 :: DR-0001
+dr2 :: Use REST API :: https://example.com/dr2 :: DR-0002, general
+dr3 :: Adopt Microservices :: https://example.com/dr3 :: ADR0001
+dr4 :: Version Link :: https://example.com/dr4 :: 11.21
+dr5 :: JIRA Issue :: https://example.com/dr5 :: KEY-42
+dr6 :: Invalid Tag :: https://example.com/dr6 :: INVALID-TAG

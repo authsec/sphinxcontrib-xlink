@@ -1,0 +1,5 @@
+# xlink-section-name: References
+nist-csf :: NIST Cybersecurity Framework :: https://example.com/nist-csf :: bib:type:online, bib:author:Zeeshan Haider, bib:year:2021, bib:urldate:2026-07-10, general
+beethoven-bio :: Biography of Beethoven :: https://example.com/beethoven :: bib:type:book, bib:author:"van Beethoven, Ludwig", bib:year:1900, bib:publisher:Classic Books
+no-bib-link :: Regular Link :: https://example.com/regular :: general
+missing-fields :: Incomplete Entry :: https://example.com/incomplete :: bib:type:article

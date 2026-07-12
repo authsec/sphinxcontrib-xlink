@@ -9,7 +9,7 @@ from docutils.statemachine import ViewList
 from docutils.parsers.rst import Directive, directives
 from sphinx.util import logging
 from sphinx.addnodes import download_reference
-from . import xlink_reference
+from . import xlink_reference, is_tag_allowed, resolve_tag_info, parse_tag_list
 
 logger = logging.getLogger(__name__)
 
@@ -271,14 +271,7 @@ class XLinkListDirective(Directive):
             return [self.state.document.reporter.warning(f"xlink directory not found: {source_directory}")]
 
         def resolve_tag(t):
-            if t is None:
-                return config.xlink_default_untagged_name, ""
-            if config.xlink_allowed_tags and t in config.xlink_allowed_tags:
-                val = config.xlink_allowed_tags[t]
-                if isinstance(val, (list, tuple)):
-                    return str(val[0]), str(val[1]) if len(val) > 1 else ""
-                return str(val), ""
-            return str(t), ""
+            return resolve_tag_info(t, config)
 
         id_regexes = []
         id_regex_input = self.options.get('id-filter-regex') or self.options.get('id-starts-with')
@@ -424,15 +417,15 @@ class XLinkListDirective(Directive):
                                 parts = [p.strip() for p in clean_line.split(" :: ", 3)]
                                 if len(parts) in (3, 4):
                                     lid, title, url = parts[:3]
-                                    raw_tags = [t.strip() for t in parts[3].split(',')] if len(parts) == 4 else []
+                                    raw_tags = parse_tag_list(parts[3]) if len(parts) == 4 else []
                                     
                                     valid_tags = []
                                     for t in raw_tags:
                                         if not t: continue
-                                        if config.xlink_allowed_tags and t not in config.xlink_allowed_tags:
+                                        if not is_tag_allowed(t, config):
                                             warning_key = f"{filename}:{line_num}:tag:{t}"
                                             if warning_key not in _WARNED_ENTRIES:
-                                                logger.warning(f"xlink: Unknown tag '{t}' in {filename}:{line_num}. Define the tag in conf.py:xlink_allowed_tags", location=(env.docname, self.lineno))
+                                                logger.warning(f"xlink: Unknown tag '{t}' in {filename}:{line_num}. Define the tag in conf.py:xlink_allowed_tags or xlink_allowed_tag_patterns", location=(env.docname, self.lineno))
                                                 _WARNED_ENTRIES.add(warning_key)
                                         else:
                                             valid_tags.append(t)
@@ -675,12 +668,12 @@ class XLinkSearchDirective(Directive):
                                 parts = [p.strip() for p in clean_line.split(" :: ", 3)]
                                 if len(parts) in (3, 4):
                                     lid, title, url = parts[:3]
-                                    raw_tags = [t.strip() for t in parts[3].split(',')] if len(parts) == 4 else []
+                                    raw_tags = parse_tag_list(parts[3]) if len(parts) == 4 else []
                                     
                                     valid_tags = []
                                     for t in raw_tags:
                                         if not t: continue
-                                        if config.xlink_allowed_tags and t not in config.xlink_allowed_tags:
+                                        if not is_tag_allowed(t, config):
                                             pass
                                         else:
                                             valid_tags.append(t)

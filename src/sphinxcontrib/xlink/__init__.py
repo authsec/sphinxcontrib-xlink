@@ -453,8 +453,135 @@ def cleanup_temp_files(app, exception):
         except Exception: pass
 
 
+# --- Tag Pattern Matching Helpers ---
+
+_compiled_tag_patterns = None
+
+def _compile_tag_patterns(config):
+    """Compile and cache regex patterns from xlink_allowed_tag_patterns."""
+    global _compiled_tag_patterns
+    patterns = getattr(config, 'xlink_allowed_tag_patterns', {})
+    _compiled_tag_patterns = []
+    for pattern_str, metadata in patterns.items():
+        try:
+            compiled = re.compile(pattern_str)
+            _compiled_tag_patterns.append((compiled, pattern_str, metadata))
+        except re.error as e:
+            logger.warning(f"xlink: Invalid regex in xlink_allowed_tag_patterns: '{pattern_str}': {e}")
+
+
+def match_tag_pattern(tag, config):
+    """Check if a tag matches any pattern in xlink_allowed_tag_patterns.
+
+    Returns the pattern's metadata tuple if matched, None otherwise.
+    Uses re.fullmatch() so the pattern must match the entire tag string.
+    """
+    global _compiled_tag_patterns
+    if _compiled_tag_patterns is None:
+        _compile_tag_patterns(config)
+    for compiled, pattern_str, metadata in _compiled_tag_patterns:
+        if compiled.fullmatch(tag):
+            return metadata
+    return None
+
+
+def is_tag_allowed(tag, config):
+    """Check if a tag is allowed by static tags or pattern match.
+
+    Returns True if:
+    - No restrictions are configured (both dicts empty)
+    - Tag matches a key in xlink_allowed_tags (exact)
+    - Tag matches a pattern in xlink_allowed_tag_patterns (regex)
+    """
+    has_static = bool(config.xlink_allowed_tags)
+    has_patterns = bool(getattr(config, 'xlink_allowed_tag_patterns', {}))
+    if not has_static and not has_patterns:
+        return True
+    if has_static and tag in config.xlink_allowed_tags:
+        return True
+    if has_patterns and match_tag_pattern(tag, config) is not None:
+        return True
+    return False
+
+
+def parse_tag_list(raw: str) -> list[str]:
+    """Split a comma-separated tag string, respecting double-quoted values.
+
+    Commas inside double quotes are NOT treated as separators.
+    Quotes are preserved in the returned tag strings.
+    Whitespace around each tag is stripped. Empty strings are excluded.
+
+    Examples:
+        >>> parse_tag_list('engineer, code')
+        ['engineer', 'code']
+        >>> parse_tag_list('bib:author:"van Beethoven, Ludwig", bib:year:2021')
+        ['bib:author:"van Beethoven, Ludwig"', 'bib:year:2021']
+        >>> parse_tag_list('')
+        []
+    """
+    if not raw:
+        return []
+    tags = []
+    current = []
+    in_quotes = False
+    for ch in raw:
+        if ch == '"':
+            in_quotes = not in_quotes
+            current.append(ch)
+        elif ch == ',' and not in_quotes:
+            tag = ''.join(current).strip()
+            if tag:
+                tags.append(tag)
+            current = []
+        else:
+            current.append(ch)
+    # Last segment
+    tag = ''.join(current).strip()
+    if tag:
+        tags.append(tag)
+    return tags
+
+
+def resolve_tag_info(tag, config):
+    """Resolve a tag to (display_name, description).
+
+    Priority:
+    1. If tag is None, return the default untagged name.
+    2. Exact match in xlink_allowed_tags -> use configured name/desc.
+    3. Pattern match in xlink_allowed_tag_patterns -> use the tag's literal
+       value as display name, pattern's description as section description.
+    4. Fallback: tag value itself, no description.
+    """
+    if tag is None:
+        return getattr(config, 'xlink_default_untagged_name', 'Untagged'), ""
+
+    # Static exact match
+    if config.xlink_allowed_tags and tag in config.xlink_allowed_tags:
+        val = config.xlink_allowed_tags[tag]
+        if isinstance(val, (list, tuple)):
+            return str(val[0]), str(val[1]) if len(val) > 1 else ""
+        return str(val), ""
+
+    # Pattern match — use tag value itself as display name
+    metadata = match_tag_pattern(tag, config)
+    if metadata is not None:
+        if isinstance(metadata, (list, tuple)):
+            return str(tag), str(metadata[1]) if len(metadata) > 1 else ""
+        return str(tag), ""
+
+    return str(tag), ""
+
+
+def _validate_tag_patterns(app, config):
+    """Compile tag patterns at config-inited time and warn on errors."""
+    global _compiled_tag_patterns
+    _compiled_tag_patterns = None  # Reset cache for fresh builds
+    _compile_tag_patterns(config)
+
+
 from .roles import xlink_role
 from .directives import XLinkListDirective, XLinkSearchDirective
+from .bib import generate_bib_file
 
 def setup(app):
     app.add_config_value('xlink_directory', 'xlinks', 'env')
@@ -465,8 +592,20 @@ def setup(app):
     app.add_config_value('xlink_check_timeout', 5.0, 'env')
     app.add_config_value('xlink_latex_show_urls', 'no', 'env')
     app.add_config_value('xlink_allowed_tags', {}, 'env')
+    app.add_config_value('xlink_allowed_tag_patterns', {}, 'env')
     app.add_config_value('xlink_default_untagged_name', 'Untagged', 'env')
     app.add_config_value('xlink_needs_string_link_options', ['xlink'], 'env')
+    
+    app.add_config_value('xlink_generate_bib', False, 'env')
+    app.add_config_value('xlink_bib_required_fields', {
+        'article': ['author', 'title', 'journal', 'year'],
+        'book': ['author', 'title', 'publisher', 'year'],
+        'inproceedings': ['author', 'title', 'booktitle', 'year'],
+        'manual': ['title'],
+        'misc': [],
+        'online': ['author', 'title', 'year', 'url'],
+        'techreport': ['author', 'title', 'institution', 'year'],
+    }, 'env')
     
     app.add_config_value('xlink_add_to_toctree_builders', ['html', 'dirhtml', 'singlehtml', 'readthedocs'], 'env')
     
@@ -481,6 +620,7 @@ def setup(app):
     app.add_directive('xlink-search', XLinkSearchDirective)
     
     app.connect('builder-inited', generate_vscode_snippets)
+    app.connect('config-inited', _validate_tag_patterns)
     app.connect('config-inited', register_needs_integration)
     app.connect('env-updated', generate_vscode_term_snippets)
     app.connect('env-updated', generate_vscode_ref_snippets)
@@ -489,6 +629,7 @@ def setup(app):
     app.connect('env-updated', generate_vscode_file_snippets)
     
     app.connect('build-finished', cleanup_temp_files)
+    app.connect('build-finished', generate_bib_file)
     app.connect('doctree-resolved', downgrade_xlink_nodes)
 
     package_dir = os.path.abspath(os.path.dirname(__file__))
@@ -497,4 +638,4 @@ def setup(app):
     app.add_css_file('xlink.css')
     app.add_js_file('xlink-search.js')
 
-    return {'version': '1.2.0', 'parallel_read_safe': True, 'parallel_write_safe': True}
+    return {'version': '1.3.0', 'parallel_read_safe': True, 'parallel_write_safe': True}

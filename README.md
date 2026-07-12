@@ -4,9 +4,11 @@
 
 It also supercharges your authoring experience with a custom VSCode snippet engine that provides instant autocomplete for external links, glossary terms, document section headers, tags, files, and **Sphinx-Needs dynamic functions**.
 
-## Interactive Bookmark Search (HTML only)
+---
 
-> **Important**: The search feature only works with **HTML output** (`html`, `dirhtml`, `singlehtml`, `readthedocs` builders). It renders a client-side JavaScript widget that is not available in LaTeX/PDF or other non-HTML builders.
+## 🔍 Interactive Bookmark Search (HTML only)
+
+> **⚠️ Important**: The search feature only works with **HTML output** (`html`, `dirhtml`, `singlehtml`, `readthedocs` builders). It renders a client-side JavaScript widget that is not available in LaTeX/PDF or other non-HTML builders.
 
 The `.. xlink-search::` directive embeds a fully interactive, real-time search interface directly into your documentation. Readers can instantly search, filter, and navigate your entire link database without leaving the page.
 
@@ -173,6 +175,17 @@ xlink_allowed_tags = {
     'external': 'Third-Party Services'
 }
 
+# Dynamic Tag Patterns (regex-based validation)
+# For identifier-style tags that follow a pattern but vary in their specific value.
+# Uses re.fullmatch() — patterns must match the entire tag string.
+# Format: r'regex-pattern': ('Category Name', 'Description')
+xlink_allowed_tag_patterns = {
+    r'DR-\d{4}': ('Decision Record', 'Architecture decision record identifiers.'),
+    r'ADR\d{4}': ('ADR', 'Architecture decision records (compact format).'),
+    r'KEY-\d+': ('JIRA Key', 'JIRA issue identifiers.'),
+    r'\d{2}\.\d{2}': ('Version', 'Version identifiers (e.g. 11.21).'),
+}
+
 # Sphinx TOC Integration
 # Define which builders automatically append lists to the Sphinx Document TOC tree.
 xlink_add_to_toctree_builders = ['html', 'dirhtml', 'singlehtml', 'readthedocs']
@@ -232,6 +245,141 @@ xlink_render_link_icon = False  # Icons don't render in PDF
 xlink_check_links = True
 xlink_check_timeout = 10.0
 ```
+
+---
+
+## Dynamic Tag Patterns (Regex-Based Validation)
+
+When working with documentation bound to structured identifiers — decision records (`DR-0001`), JIRA keys (`KEY-42`), version numbers (`11.21`), or architecture decision records (`ADR0001`) — listing every possible tag in `xlink_allowed_tags` becomes impractical.
+
+The `xlink_allowed_tag_patterns` config value lets you define **regex patterns** that validate tags dynamically, while keeping the same strict governance over what's allowed.
+
+### How It Works
+
+1. When a tag is encountered in a `.xlink` file, it is first checked against `xlink_allowed_tags` (exact match).
+2. If no exact match is found, it is tested against each pattern in `xlink_allowed_tag_patterns` using `re.fullmatch()`.
+3. If neither matches, a warning is emitted (just like with unknown static tags).
+
+`re.fullmatch()` ensures the **entire tag** must match the pattern — partial matches are rejected. For example, `DR-\d{4}` matches `DR-0001` but not `XDR-0001`, `DR-00011`, or `DR-01`.
+
+### Configuration
+
+```python
+# Static tags (exact match, unchanged behavior)
+xlink_allowed_tags = {
+    'general': ('General', 'General purpose links.'),
+    'project:dawn': ('Project Dawn', 'Links for the Dawn initiative.'),
+}
+
+# Dynamic tag patterns (regex-based)
+xlink_allowed_tag_patterns = {
+    r'DR-\d{4}':    ('Decision Record', 'Architecture decision record identifiers (DR-0001 through DR-9999).'),
+    r'ADR\d{4}':    ('ADR', 'Architecture decision records in compact format.'),
+    r'KEY-\d+':     ('JIRA Key', 'JIRA issue identifiers (any number of digits).'),
+    r'\d{2}\.\d{2}': ('Version', 'Two-part version identifiers like 11.21 or 03.07.'),
+    r'RFC-\d+':     ('RFC', 'Internal Request for Comments identifiers.'),
+    r'EPIC-[A-Z]{2,6}-\d+': ('Epic', 'Cross-team epic identifiers.'),
+}
+```
+
+### .xlink File Usage
+
+With the configuration above, these tags are all valid without being listed individually:
+
+```text
+# xlink-section-name: Architecture Decisions
+dr-pg :: Use PostgreSQL :: https://wiki.example.com/dr/0001 :: DR-0001
+dr-rest :: Use REST API :: https://wiki.example.com/dr/0002 :: DR-0002, general
+dr-micro :: Adopt Microservices :: https://wiki.example.com/dr/0003 :: ADR0003
+
+# xlink-section-name: Sprint Links
+ticket-auth :: Auth Refactor :: https://jira.example.com/KEY-1234 :: KEY-1234
+ticket-perf :: Performance Fix :: https://jira.example.com/KEY-5678 :: KEY-5678, project:dawn
+
+# xlink-section-name: Release Notes
+release-nov :: November Release :: https://releases.example.com/11.21 :: 11.21
+release-dec :: December Release :: https://releases.example.com/12.01 :: 12.01
+```
+
+### Display Name Resolution
+
+When grouped by tag, pattern-matched tags use their **literal value** as the section heading:
+
+```rst
+.. xlink-list::
+   :group-by: tag
+```
+
+This produces sections headed by the actual identifiers (e.g., "DR-0001", "DR-0002", "KEY-1234") rather than the generic category name. This is intentional — each identifier is unique and semantically meaningful.
+
+Static tags continue to use their configured display name (e.g., `'general'` renders as "General").
+
+### Pattern Examples
+
+| Pattern | Matches | Does NOT Match |
+| --- | --- | --- |
+| `r'DR-\d{4}'` | `DR-0001`, `DR-9999` | `DR-1`, `DR-00001`, `XDR-0001` |
+| `r'KEY-\d+'` | `KEY-1`, `KEY-12345` | `KEY-`, `KEY`, `MYKEY-1` |
+| `r'ADR\d{4}'` | `ADR0001`, `ADR1234` | `ADR-0001`, `ADR12345`, `XADR0001` |
+| `r'\d{2}\.\d{2}'` | `11.21`, `03.07` | `1.21`, `111.21`, `11.2` |
+| `r'RFC-\d+'` | `RFC-1`, `RFC-9999` | `RFC-`, `rfc-1`, `XRFC-1` |
+| `r'v\d+\.\d+\.\d+'` | `v1.0.0`, `v12.3.45` | `v1.0`, `V1.0.0`, `1.0.0` |
+| `r'EPIC-[A-Z]{2,6}-\d+'` | `EPIC-BE-1`, `EPIC-FRONT-42` | `EPIC-X-1`, `EPIC-be-1` |
+| `r'(feat|fix|chore)/[a-z0-9-]+'` | `feat/auth-flow`, `fix/null-ptr` | `feature/x`, `FEAT/x` |
+
+### Combining with Tag Filters
+
+Pattern-matched tags work seamlessly with the `:tags:` directive option:
+
+```rst
+.. xlink-list::
+   :tags: DR-0001, DR-0002, KEY-1234
+   :group-by: tag
+```
+
+And with the `:query:` engine:
+
+```rst
+.. xlink-list::
+   :query: any(re.match(r'DR-\d{4}', t) for t in tags)
+```
+
+### Invalid Pattern Handling
+
+If a pattern in `xlink_allowed_tag_patterns` contains invalid regex syntax, a warning is emitted at build startup and the pattern is skipped:
+
+```python
+# This will emit: "xlink: Invalid regex in xlink_allowed_tag_patterns: '[invalid': ..."
+xlink_allowed_tag_patterns = {
+    r'[invalid': ('Bad Pattern', 'This will be skipped.'),
+    r'DR-\d{4}': ('Decision Record', 'This still works.'),
+}
+```
+
+### Migration from Static Tags
+
+If you previously listed every identifier manually:
+
+```python
+# Before: verbose and hard to maintain
+xlink_allowed_tags = {
+    'DR-0001': ('DR-0001', 'Decision Record'),
+    'DR-0002': ('DR-0002', 'Decision Record'),
+    'DR-0003': ('DR-0003', 'Decision Record'),
+    # ... hundreds more
+}
+```
+
+Replace with a single pattern:
+
+```python
+# After: one pattern covers all current and future DRs
+xlink_allowed_tag_patterns = {
+    r'DR-\d{4}': ('Decision Record', 'Architecture decision record identifiers.'),
+}
+```
+
+Existing static tags in `xlink_allowed_tags` continue to work unchanged — both systems coexist.
 
 ---
 
@@ -491,3 +639,349 @@ Or as a hidden overlay triggered by `⌘+⇧+K`:
 | --- | --- |
 | `` :xlink:`link-id` `` | Renders with the title defined in the `.xlink` file |
 | `` :xlink:`Custom Text <link-id>` `` | Renders with "Custom Text" as the label |
+
+---
+
+## BibTeX File Generation
+
+`sphinxcontrib-xlink` can automatically generate a `.bib` (BibTeX) file from your `.xlink` entries. This is useful when your documentation references academic papers, standards, books, or online resources that you also want to cite in LaTeX documents or integrate with tools like `sphinxcontrib-bibtex`.
+
+### How It Works
+
+BibTeX metadata is encoded directly in the tag field of `.xlink` entries using the `bib:field:value` convention. Any entry tagged with `bib:type:<entrytype>` is collected and exported to a `.bib` file during the Sphinx build.
+
+The xlink entry's **ID** becomes the BibTeX cite key, **title** becomes the `title` field, and **url** becomes the `url` field — these are inherited automatically and do not need to be repeated as tags.
+
+### Quick Start
+
+**1. Enable in `conf.py`:**
+
+```python
+extensions = ['sphinxcontrib.xlink']
+
+xlink_generate_bib = 'references.bib'  # Output path (relative to source dir)
+
+# Allow bib: tags via pattern matching
+xlink_allowed_tag_patterns = {
+    r'bib:[a-z]+:.*': ('BibTeX', 'BibTeX metadata tags.'),
+}
+```
+
+**2. Add BibTeX metadata to your `.xlink` files:**
+
+```text
+# xlink-section-name: References
+nist-csf :: NIST Cybersecurity Framework :: https://example.com/nist-csf :: bib:type:online, bib:author:Zeeshan Haider, bib:year:2021, bib:urldate:2026-07-10, general
+moore-bio :: HD Moore Biography :: https://example.com/moore :: bib:type:book, bib:author:Harold David Moore, bib:year:2019, bib:publisher:Tech Press
+```
+
+**3. Build your docs:**
+
+```bash
+make html
+```
+
+A `references.bib` file is generated in your source directory:
+
+```bibtex
+@book{moore-bio,
+  author = {Harold David Moore},
+  title = {HD Moore Biography},
+  url = {https://example.com/moore},
+  year = {2019},
+  publisher = {Tech Press},
+}
+
+@online{nist-csf,
+  author = {Zeeshan Haider},
+  title = {NIST Cybersecurity Framework},
+  url = {https://example.com/nist-csf},
+  year = {2021},
+  urldate = {2026-07-10},
+}
+```
+
+### Tag Convention
+
+All BibTeX metadata tags use the `bib:field:value` format:
+
+| Tag | Purpose |
+| --- | --- |
+| `bib:type:online` | BibTeX entry type (required to trigger export) |
+| `bib:author:John Smith` | Author field |
+| `bib:author:"van Beethoven, Ludwig"` | Author with comma (quoted) |
+| `bib:year:2021` | Year field |
+| `bib:publisher:O'Reilly` | Publisher field |
+| `bib:journal:IEEE Security` | Journal field |
+| `bib:booktitle:Proc. USENIX` | Booktitle field |
+| `bib:institution:MIT` | Institution field |
+| `bib:doi:https://doi.org/10.1000/xyz` | DOI (colons in value are fine) |
+| `bib:urldate:2026-07-10` | URL access date |
+| `bib:howpublished:Self-Published` | How published field |
+| `bib:note:Accessed via VPN` | Note field |
+
+**Important notes:**
+
+- The `bib:type:*` tag is **required** — entries without it are ignored by the bib generator.
+- `title` and `url` are automatically derived from the xlink entry itself (no need to repeat them as tags). If you explicitly set `bib:title:...` or `bib:url:...`, the explicit tag takes priority.
+- Colons in values are handled correctly because the field/value split uses only the **first** colon after the `bib:` prefix.
+- Entries are sorted alphabetically by cite key for deterministic output.
+
+### Handling Commas in Values (Quote-Aware Parsing)
+
+If a field value contains a comma (common in author names like "Last, First"), wrap it in double quotes:
+
+```text
+beethoven-bio :: Biography of Beethoven :: https://example.com/beethoven :: bib:type:book, bib:author:"van Beethoven, Ludwig", bib:year:1900, bib:publisher:Classic Books
+```
+
+The quotes prevent the comma from being treated as a tag separator. In the generated `.bib` file, the quotes are stripped:
+
+```bibtex
+@book{beethoven-bio,
+  author = {van Beethoven, Ludwig},
+  title = {Biography of Beethoven},
+  url = {https://example.com/beethoven},
+  year = {1900},
+  publisher = {Classic Books},
+}
+```
+
+This quote-aware parsing applies to **all** tags, not just bib tags. Any tag value containing commas can be quoted.
+
+### Supported Entry Types
+
+The following BibTeX entry types are supported with default required field validation:
+
+| Entry Type | Required Fields |
+| --- | --- |
+| `article` | author, title, journal, year |
+| `book` | author, title, publisher, year |
+| `inproceedings` | author, title, booktitle, year |
+| `manual` | title |
+| `misc` | *(none)* |
+| `online` | author, title, year, url |
+| `techreport` | author, title, institution, year |
+
+If required fields are missing, a **warning** is emitted during build (non-fatal):
+
+```
+WARNING: xlink-bib: Entry 'my-entry' (type 'article') is missing required fields: author, journal, year
+```
+
+### Configuration Options
+
+```python
+# Path to the generated .bib file (relative to srcdir, or absolute).
+# Set to False to disable generation entirely.
+xlink_generate_bib = 'references.bib'
+
+# Customize required fields per entry type.
+# Override the defaults or add new entry types.
+xlink_bib_required_fields = {
+    'article': ['author', 'title', 'journal', 'year'],
+    'book': ['author', 'title', 'publisher', 'year'],
+    'inproceedings': ['author', 'title', 'booktitle', 'year'],
+    'manual': ['title'],
+    'misc': [],
+    'online': ['author', 'title', 'year', 'url'],
+    'techreport': ['author', 'title', 'institution', 'year'],
+}
+```
+
+### Mixing BibTeX and Regular Tags
+
+Entries can have both `bib:` tags and regular tags simultaneously. Regular tags are used for filtering and grouping in `xlink-list` directives, while `bib:` tags drive the `.bib` file generation:
+
+```text
+nist-csf :: NIST Cybersecurity Framework :: https://example.com/nist-csf :: bib:type:online, bib:author:Zeeshan Haider, bib:year:2021, security, standards, general
+```
+
+This entry will:
+1. Appear in `.bib` output as an `@online` entry
+2. Appear under "security", "standards", and "general" tag groups in `xlink-list`
+
+### Listing Only BibTeX Entries
+
+Use the `:query:` engine to filter your link list to only show entries that have a `bib:type:*` tag:
+
+```rst
+.. xlink-list::
+   :query: any(t.startswith('bib:type:') for t in tags)
+   :group-by: tag
+   :sort-by: title
+   :order: asc
+```
+
+Or filter by specific BibTeX entry type:
+
+```rst
+.. Only books
+.. xlink-list::
+   :query: 'bib:type:book' in tags
+   :sort-by: title
+
+.. Only online resources
+.. xlink-list::
+   :query: 'bib:type:online' in tags
+   :sort-by: title
+```
+
+### Sorting BibTeX Entries by Author
+
+While the `.bib` file itself is sorted alphabetically by cite key, you can sort the rendered list by title (which often correlates with author for bibliographic entries):
+
+```rst
+.. xlink-list::
+   :query: any(t.startswith('bib:type:') for t in tags)
+   :sort-by: title
+   :order: asc
+```
+
+To group by author using tag-based grouping, you can filter on `bib:author:` tags:
+
+```rst
+.. xlink-list::
+   :query: any(t.startswith('bib:author:') for t in tags)
+   :tags: bib:author:Zeeshan Haider, bib:author:Harold David Moore
+   :group-by: tag
+```
+
+This creates separate sections per author, each listing their referenced works.
+
+### Grouping by Entry Type
+
+```rst
+.. xlink-list::
+   :query: any(t.startswith('bib:type:') for t in tags)
+   :tags: bib:type:online, bib:type:book, bib:type:article
+   :group-by: tag
+   :sort-by: title
+```
+
+This renders sections like "bib:type:online", "bib:type:book", etc., each containing the relevant entries.
+
+### Combining with `sphinxcontrib-bibtex`
+
+If you also use `sphinxcontrib-bibtex` for citation rendering, point it at the generated `.bib` file:
+
+```python
+# conf.py
+extensions = ['sphinxcontrib.xlink', 'sphinxcontrib.bibtex']
+
+xlink_generate_bib = 'references.bib'
+bibtex_bibfiles = ['references.bib']
+```
+
+Now you can use standard `.. bibliography::` directives and `:cite:` roles while managing all your references in `.xlink` files.
+
+### Complete Example
+
+**`conf.py`:**
+
+```python
+extensions = ['sphinxcontrib.xlink']
+
+xlink_directory = 'xlinks'
+xlink_generate_bib = 'references.bib'
+
+xlink_allowed_tags = {
+    'security': ('Security', 'Cybersecurity resources.'),
+    'standards': ('Standards', 'Industry standards and frameworks.'),
+    'general': ('General', 'General purpose links.'),
+}
+
+xlink_allowed_tag_patterns = {
+    r'bib:[a-z]+:.*': ('BibTeX', 'BibTeX metadata tags.'),
+}
+
+xlink_generate_vscode_snippets = True
+```
+
+**`xlinks/references.xlink`:**
+
+```text
+# xlink-section-name: Academic References
+# xlink-section-description: Papers, books, and standards referenced in this project.
+nist-csf :: NIST Cybersecurity Framework :: https://www.nist.gov/cyberframework :: bib:type:online, bib:author:National Institute of Standards and Technology, bib:year:2018, bib:urldate:2026-07-10, security, standards
+mitre-attack :: MITRE ATT&CK Framework :: https://attack.mitre.org :: bib:type:online, bib:author:MITRE Corporation, bib:year:2015, bib:urldate:2026-07-10, security
+anderson-sec :: Security Engineering :: https://www.cl.cam.ac.uk/~rja14/book.html :: bib:type:book, bib:author:Ross Anderson, bib:year:2020, bib:publisher:Wiley, security
+beethoven-opus :: Beethoven Complete Works :: https://example.com/beethoven :: bib:type:book, bib:author:"van Beethoven, Ludwig", bib:year:1827, bib:publisher:Classic Archive
+rfc-tls13 :: TLS 1.3 Specification :: https://www.rfc-editor.org/rfc/rfc8446 :: bib:type:techreport, bib:author:Eric Rescorla, bib:year:2018, bib:institution:IETF, bib:doi:https://doi.org/10.17487/RFC8446, security, standards
+```
+
+**`docs/references.rst`:**
+
+```rst
+References
+==========
+
+All References (Rendered)
+-------------------------
+
+.. xlink-list::
+   :query: any(t.startswith('bib:type:') for t in tags)
+   :sort-by: title
+   :order: asc
+
+Grouped by Type
+---------------
+
+.. xlink-list::
+   :query: any(t.startswith('bib:type:') for t in tags)
+   :tags: bib:type:book, bib:type:online, bib:type:techreport
+   :group-by: tag
+   :sort-by: title
+
+Security References Only
+------------------------
+
+.. xlink-list::
+   :query: any(t.startswith('bib:type:') for t in tags) and 'security' in tags
+   :sort-by: title
+```
+
+**Generated `references.bib`:**
+
+```bibtex
+@book{anderson-sec,
+  author = {Ross Anderson},
+  title = {Security Engineering},
+  url = {https://www.cl.cam.ac.uk/~rja14/book.html},
+  year = {2020},
+  publisher = {Wiley},
+}
+
+@book{beethoven-opus,
+  author = {van Beethoven, Ludwig},
+  title = {Beethoven Complete Works},
+  url = {https://example.com/beethoven},
+  year = {1827},
+  publisher = {Classic Archive},
+}
+
+@online{mitre-attack,
+  author = {MITRE Corporation},
+  title = {MITRE ATT&CK Framework},
+  url = {https://attack.mitre.org},
+  year = {2015},
+  urldate = {2026-07-10},
+}
+
+@online{nist-csf,
+  author = {National Institute of Standards and Technology},
+  title = {NIST Cybersecurity Framework},
+  url = {https://www.nist.gov/cyberframework},
+  year = {2018},
+  urldate = {2026-07-10},
+}
+
+@techreport{rfc-tls13,
+  author = {Eric Rescorla},
+  title = {TLS 1.3 Specification},
+  url = {https://www.rfc-editor.org/rfc/rfc8446},
+  year = {2018},
+  institution = {IETF},
+  doi = {https://doi.org/10.17487/RFC8446},
+}
+```
