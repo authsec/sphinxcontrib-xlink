@@ -210,6 +210,9 @@ xlink_latex_show_urls = 'no'
 # Visual Enhancements
 xlink_render_link_icon = True
 xlink_list_render_link_icon = False
+
+# BibTeX Generation (False to disable, True for default 'references.bib', or a string path)
+xlink_generate_bib = False
 ```
 
 ### Configuration Examples by Use Case

@@ -626,7 +626,9 @@ def setup(app):
     app.add_config_value('xlink_default_untagged_name', 'Untagged', 'env')
     app.add_config_value('xlink_needs_string_link_options', ['xlink'], 'env')
     
-    app.add_config_value('xlink_generate_bib', False, 'env')
+    # types=[bool, str]: default is False (disabled) but accepts a string path;
+    # declaring both types prevents Sphinx from emitting a type-mismatch warning.
+    app.add_config_value('xlink_generate_bib', False, 'env', [bool, str])
     app.add_config_value('xlink_bib_required_fields', {
         'article': ['author', 'title', 'journal', 'year'],
         'book': ['author', 'title', 'publisher', 'year'],

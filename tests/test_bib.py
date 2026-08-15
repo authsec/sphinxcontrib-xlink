@@ -2,6 +2,19 @@ import pytest
 from pathlib import Path
 
 
+@pytest.fixture(autouse=True)
+def _reset_tag_pattern_cache():
+    """Reset the module-level compiled tag pattern cache between tests.
+
+    sphinxcontrib.xlink caches compiled regex patterns in a module global.
+    Without this reset, state can leak between tests causing false passes/failures.
+    """
+    import sphinxcontrib.xlink as xlink_mod
+    xlink_mod._compiled_tag_patterns = None
+    yield
+    xlink_mod._compiled_tag_patterns = None
+
+
 # --- Unit tests for parse_tag_list ---
 
 def test_parse_tag_list_basic():
@@ -42,9 +55,6 @@ def test_parse_tag_list_quoted():
 @pytest.mark.sphinx('html', testroot='bib', freshenv=True)
 def test_bib_file_generated(app, status, warning):
     """Build the test root, verify references.bib exists."""
-    import sphinxcontrib.xlink as xlink_mod
-    xlink_mod._compiled_tag_patterns = None
-
     app.build(force_all=True)
 
     bib_path = Path(app.srcdir) / 'references.bib'
@@ -54,9 +64,6 @@ def test_bib_file_generated(app, status, warning):
 @pytest.mark.sphinx('html', testroot='bib', freshenv=True)
 def test_bib_file_content(app, status, warning):
     """Verify the generated .bib file contains correct entries with proper fields."""
-    import sphinxcontrib.xlink as xlink_mod
-    xlink_mod._compiled_tag_patterns = None
-
     app.build(force_all=True)
 
     bib_path = Path(app.srcdir) / 'references.bib'
@@ -77,9 +84,6 @@ def test_bib_file_content(app, status, warning):
 @pytest.mark.sphinx('html', testroot='bib', freshenv=True)
 def test_bib_quoted_author_stripped(app, status, warning):
     """Verify that in the .bib output, quoted author has quotes stripped."""
-    import sphinxcontrib.xlink as xlink_mod
-    xlink_mod._compiled_tag_patterns = None
-
     app.build(force_all=True)
 
     bib_path = Path(app.srcdir) / 'references.bib'
@@ -94,9 +98,6 @@ def test_bib_quoted_author_stripped(app, status, warning):
 @pytest.mark.sphinx('html', testroot='bib', freshenv=True)
 def test_bib_reuses_title_and_url(app, status, warning):
     """Verify title and url from the xlink entry appear in the bib output."""
-    import sphinxcontrib.xlink as xlink_mod
-    xlink_mod._compiled_tag_patterns = None
-
     app.build(force_all=True)
 
     bib_path = Path(app.srcdir) / 'references.bib'
@@ -111,9 +112,6 @@ def test_bib_reuses_title_and_url(app, status, warning):
 @pytest.mark.sphinx('html', testroot='bib', freshenv=True)
 def test_bib_skips_non_bib_entries(app, status, warning):
     """Verify no-bib-link does NOT appear in the .bib file."""
-    import sphinxcontrib.xlink as xlink_mod
-    xlink_mod._compiled_tag_patterns = None
-
     app.build(force_all=True)
 
     bib_path = Path(app.srcdir) / 'references.bib'
@@ -126,9 +124,6 @@ def test_bib_skips_non_bib_entries(app, status, warning):
 @pytest.mark.sphinx('html', testroot='bib', freshenv=True)
 def test_bib_warns_on_missing_required_fields(app, status, warning):
     """Verify that building with missing-fields produces warnings."""
-    import sphinxcontrib.xlink as xlink_mod
-    xlink_mod._compiled_tag_patterns = None
-
     app.build(force_all=True)
 
     warnings = warning.getvalue()
@@ -140,9 +135,6 @@ def test_bib_warns_on_missing_required_fields(app, status, warning):
 @pytest.mark.sphinx('html', testroot='bib', freshenv=True, confoverrides={'xlink_generate_bib': False})
 def test_bib_disabled_by_default(app, status, warning):
     """A build with xlink_generate_bib = False does not produce a .bib file."""
-    import sphinxcontrib.xlink as xlink_mod
-    xlink_mod._compiled_tag_patterns = None
-
     bib_path = Path(app.srcdir) / 'references.bib'
     # Remove any leftover from previous test runs sharing the same srcdir
     if bib_path.exists():
@@ -151,3 +143,21 @@ def test_bib_disabled_by_default(app, status, warning):
     app.build(force_all=True)
 
     assert not bib_path.exists(), "references.bib should NOT exist when xlink_generate_bib is False"
+
+
+@pytest.mark.sphinx('html', testroot='bib', freshenv=True)
+def test_bib_no_type_warning_for_string_config(app, status, warning):
+    """Verify no type mismatch warning is emitted when xlink_generate_bib is a string.
+
+    Sphinx warns when a config value's runtime type does not match the default's
+    type unless valid types are explicitly declared. This test ensures the fix
+    (declaring [bool, str] as accepted types) suppresses that warning.
+    """
+    app.build(force_all=True)
+
+    warnings = warning.getvalue()
+    # Check that no single warning line mentions both the config name and a type mismatch
+    for line in warnings.splitlines():
+        assert not ("has type" in line and "xlink_generate_bib" in line), (
+            f"Type mismatch warning found for xlink_generate_bib: {line}"
+        )
